@@ -207,7 +207,7 @@ function mashhadToursMenu() {
 // بررسی گزینه‌های منوی اصلی
 // --------------------------------
 
-if (text === "تورهای مشهد") {
+if (text === "🚌 تورهای مشهد") {
 
   await sendMessage(
     chatId,

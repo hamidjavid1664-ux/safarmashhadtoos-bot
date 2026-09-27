@@ -62,39 +62,42 @@ async function sendMessage(chatId, text, replyMarkup = undefined) {
 // منوی اصلی موقت
 // ================================
 
+```javascript
 function mainMenu() {
   return {
     keyboard: [
       [
         {
-          text: "رزرو هتل"
+          text: "🏨 رزرو هتل"
         },
         {
-          text: "تورهای مشهد"
+          text: "🚌 تورهای مشهد"
         }
       ],
       [
         {
-          text: "طرح الماس شهر بهشت"
+          text: "💎 طرح الماس شهر بهشت"
         }
       ],
       [
         {
-          text: "خدمات گردشگری"
+          text: "🧳 خدمات گردشگری"
         },
         {
-          text: "تماس با ما"
+          text: "📞 تماس با ما"
         }
       ],
       [
         {
-          text: "کانال"
+          text: "📢 کانال"
         }
       ]
     ],
     resize_keyboard: true
   };
 }
+```
+
 
 // ================================
 // دریافت Webhook بله

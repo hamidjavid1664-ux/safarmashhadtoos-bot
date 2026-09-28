@@ -1023,13 +1023,29 @@ async function submitTourRequest(chatId) {
     throw new Error("ADMIN_CHAT_ID در Environment Variables تنظیم نشده است.");
   }
 
-  await sendMessage(ADMIN_CHAT_ID, adminText, {
-    inline_keyboard: [
-      [
-        { text: "✅ تأیید درخواست", callback_data: `APPROVE_REQUEST:${requestCode}` },
-        { text: "❌ رد درخواست", callback_data: `REJECT_REQUEST:${requestCode}` }
-      ]
+  const adminButtons = [
+    [
+      { text: "✅ تأیید درخواست", callback_data: `APPROVE_REQUEST:${requestCode}` },
+      { text: "❌ رد درخواست", callback_data: `REJECT_REQUEST:${requestCode}` }
     ]
+  ];
+
+  // اگر مشتری نام کاربری بله داشته باشد، دکمه ارتباط مستقیم هم برای مدیر نمایش داده می‌شود.
+  const customerUsername = String(username || "")
+    .replace(/^@/, "")
+    .trim();
+
+  if (customerUsername && customerUsername !== "ندارد") {
+    adminButtons.push([
+      {
+        text: "💬 پیام به مشتری",
+        url: `https://ble.ir/${encodeURIComponent(customerUsername)}`
+      }
+    ]);
+  }
+
+  await sendMessage(ADMIN_CHAT_ID, adminText, {
+    inline_keyboard: adminButtons
   });
 
   await clearSession(chatId);

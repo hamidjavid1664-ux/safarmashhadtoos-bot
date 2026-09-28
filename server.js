@@ -232,6 +232,27 @@ async function clearSession(userId) {
 }
 
 /* =========================================================
+   ذخیره مشخصات کاربر بله در سشن
+========================================================= */
+async function saveBaleIdentity(chatId, message) {
+  const session = await getSession(chatId);
+  if (!session) return null;
+
+  const data = {
+    ...(session.data || {}),
+    messageInfo: {
+      ...(session.data?.messageInfo || {}),
+      username: getUsername(message) || session.data?.messageInfo?.username || "",
+      firstName: getFirstName(message) || session.data?.messageInfo?.firstName || "کاربر",
+      baleId: getUserId(message) || session.data?.messageInfo?.baleId || String(chatId)
+    }
+  };
+
+  await saveSession(chatId, session.state, data);
+  return data;
+}
+
+/* =========================================================
    تاریخچه برای کلید «بازگشت»
 ========================================================= */
 
@@ -954,8 +975,13 @@ async function submitTourRequest(chatId) {
 
   const data = session.data || {};
   const requestCode = makeRequestCode();
-  const username = data.messageInfo?.username || "ندارد";
+
+  const storedUsername = String(data.messageInfo?.username || "").trim();
+  const username = storedUsername
+    ? (storedUsername.startsWith("@") ? storedUsername : `@${storedUsername}`)
+    : "ندارد";
   const firstName = data.messageInfo?.firstName || "کاربر";
+  const baleId = String(data.messageInfo?.baleId || chatId);
 
   const payload = {
     tourType: data.tourType,
@@ -986,7 +1012,7 @@ async function submitTourRequest(chatId) {
       username,
       payload.applicantName,
       payload.phone,
-      String(chatId),
+      baleId,
       payload.tourType,
       payload.paymentType,
       JSON.stringify(payload),
@@ -1017,7 +1043,7 @@ async function submitTourRequest(chatId) {
     `📱 تماس: ${toPersianDigits(payload.phone)}\n` +
     (payload.paymentType === "loan" ? `🪪 کد ملی: ${toPersianDigits(payload.nationalCode)}\n` : "") +
     `\n👤 کاربر بله: ${username}\n` +
-    `🆔 Bale ID: ${chatId}`;
+    `🆔 Bale ID: ${baleId}`;
 
   if (!ADMIN_CHAT_ID) {
     throw new Error("ADMIN_CHAT_ID در Environment Variables تنظیم نشده است.");
@@ -1054,7 +1080,7 @@ async function submitTourRequest(chatId) {
     chatId,
     "✅ درخواست شما با موفقیت برای مدیر ارسال شد.\n\n" +
     `🆔 شماره درخواست: ${requestCode}\n` +
-    `👤 شناسه کاربری بله: ${chatId}\n` +
+    `👤 شناسه کاربری بله: ${baleId}\n` +
     `🔹 نام کاربری بله: ${username}\n\n` +
     "این شناسه را برای ارتباط مستقیم با پشتیبانی نزد خود نگه دارید.\n" +
     "پس از بررسی، نتیجه به شما اطلاع داده می‌شود.",
@@ -1468,7 +1494,13 @@ async function handleMessage(message) {
   const chatId = getChatId(message);
   if (!chatId) return;
 
-  const session = await getSession(chatId);
+  let session = await getSession(chatId);
+
+  // مشخصات کاربر بله را در سشن به‌روزرسانی می‌کنیم تا در زمان ثبت درخواست حفظ شود.
+  if (session) {
+    await saveBaleIdentity(chatId, message);
+    session = await getSession(chatId);
+  }
 
   // فایل لیست مسافران
   if (message.document && session?.state === "WAITING_PASSENGER_FILE") {
@@ -1480,7 +1512,13 @@ async function handleMessage(message) {
 
   if (text === "/start") {
     await clearSession(chatId);
-    await saveSession(chatId, "MAIN", {});
+    await saveSession(chatId, "MAIN", {
+      messageInfo: {
+        username: getUsername(message) || "",
+        firstName: getFirstName(message) || "کاربر",
+        baleId: getUserId(message) || String(chatId)
+      }
+    });
     await sendMessage(
       chatId,
       "🌹 به ربات سفر مشهد توس خوش آمدید.\n\nبرای دریافت خدمات گردشگری گزینه موردنظر را انتخاب کنید.",

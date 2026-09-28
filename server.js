@@ -7,7 +7,7 @@ const app = express();
 app.use(express.json({ limit: "20mb" }));
 
 /* =========================================================
-   طھظ†ط¸غŒظ…ط§طھ
+   تنظیمات
 ========================================================= */
 
 const PORT = Number(process.env.PORT) || 10000;
@@ -15,13 +15,13 @@ const BOT_TOKEN = process.env.BOT_TOKEN || process.env.BALE_BOT_TOKEN || "";
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || "";
 const BALE_API_BASE = "https://tapi.bale.ai/bot";
 
-const CONTACT_PHONE = "غ°غ¹غ±غ·غ·غ·غ°غ°غ¹غ¶غ±";
-const ADMIN_NAME = "ط­ظ…غŒط¯ ط¬ط§ظˆغŒط¯غŒ";
+const CONTACT_PHONE = "۰۹۱۷۷۷۰۰۹۶۱";
+const ADMIN_NAME = "حمید جاویدی";
 const CHANNEL_URL = "https://ble.ir/safarmashhadtoos";
 const WEBSITE_URL = "https://safarmashhadtoos.ir";
 
-// ط¨ط±ط§غŒ طھظˆط±ظ‡ط§غŒ ظ‡ظˆط§غŒغŒ/ط±غŒظ„غŒ/ط§طھظˆط¨ظˆط³غŒ طھط§ غ±غ° ظ†ظپط±طŒ ظˆط±ظˆط¯ ط¯ط³طھغŒ ظ„غŒط³طھ ظپط¹ط§ظ„ ط§ط³طھ.
-// ط¨غŒط´طھط± ط§ط² غ±غ° ظ†ظپط±: ظپط§غŒظ„ ظ„غŒط³طھ ط¯ط±غŒط§ظپطھ ظ…غŒâ€Œط´ظˆط¯.
+// برای تورهای هوایی/ریلی/اتوبوسی تا ۱۰ نفر، ورود دستی لیست فعال است.
+// بیشتر از ۱۰ نفر: فایل لیست دریافت می‌شود.
 const MANUAL_PASSENGER_LIMIT = 10;
 
 const pool = new Pool({
@@ -30,34 +30,34 @@ const pool = new Pool({
 });
 
 /* =========================================================
-   ط§ط¨ط²ط§ط± ط§ط¹ط¯ط§ط¯
+   ابزار اعداد
 ========================================================= */
 
 function toEnglishDigits(value) {
   if (value === undefined || value === null) return "";
 
   return String(value)
-    .replace(/[غ°-غ¹]/g, d => String("غ°غ±غ²غ³غ´غµغ¶غ·غ¸غ¹".indexOf(d)))
-    .replace(/[ظ -ظ©]/g, d => String("ظ ظ،ظ¢ظ£ظ¤ظ¥ظ¦ظ§ظ¨ظ©".indexOf(d)));
+    .replace(/[۰-۹]/g, d => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/[٠-٩]/g, d => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
 }
 
 function toPersianDigits(value) {
   if (value === undefined || value === null) return "";
 
   return String(value)
-    .replace(/0/g, "غ°")
-    .replace(/1/g, "غ±")
-    .replace(/2/g, "غ²")
-    .replace(/3/g, "غ³")
-    .replace(/4/g, "غ´")
-    .replace(/5/g, "غµ")
-    .replace(/6/g, "غ¶")
-    .replace(/7/g, "غ·")
-    .replace(/8/g, "غ¸")
-    .replace(/9/g, "غ¹");
+    .replace(/0/g, "۰")
+    .replace(/1/g, "۱")
+    .replace(/2/g, "۲")
+    .replace(/3/g, "۳")
+    .replace(/4/g, "۴")
+    .replace(/5/g, "۵")
+    .replace(/6/g, "۶")
+    .replace(/7/g, "۷")
+    .replace(/8/g, "۸")
+    .replace(/9/g, "۹");
 }
 
-// ظ†ظ…ط§غŒط´ طھط§ط±غŒط® ط§ط² ع†ظ¾ ط¨ظ‡ ط±ط§ط³طھ ط¯ط± ظ…ط­غŒط· ط±ط§ط³طھâ€Œط¨ظ‡â€Œع†ظ¾ ط¨ظ„ظ‡
+// نمایش تاریخ از چپ به راست در محیط راست‌به‌چپ بله
 function ltrDate(value) {
   return `\u200E${toEnglishDigits(value)}\u200E`;
 }
@@ -110,7 +110,7 @@ function normalizeNationalCode(value) {
 }
 
 /* =========================================================
-   ط§ط·ظ„ط§ط¹ط§طھ ع©ط§ط±ط¨ط± / ط¨ظ„ظ‡
+   اطلاعات کاربر / بله
 ========================================================= */
 
 function getUserId(message) {
@@ -145,16 +145,16 @@ function getFirstName(message) {
     message?.sender?.firstName ||
     message?.from?.first_name ||
     message?.from?.firstName ||
-    "ع©ط§ط±ط¨ط±"
+    "کاربر"
   );
 }
 
 /* =========================================================
-   ط¯غŒطھط§ط¨غŒط³
+   دیتابیس
 ========================================================= */
 
 async function initDB() {
-  console.log("ًں”„ Initializing database...");
+  console.log("🔄 Initializing database...");
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -200,7 +200,7 @@ async function initDB() {
     await pool.query(`ALTER TABLE requests ADD COLUMN IF NOT EXISTS ${name} ${type}`);
   }
 
-  console.log("âœ… Database initialized successfully");
+  console.log("✅ Database initialized successfully");
 }
 
 async function getSession(userId) {
@@ -232,7 +232,7 @@ async function clearSession(userId) {
 }
 
 /* =========================================================
-   طھط§ط±غŒط®ع†ظ‡ ط¨ط±ط§غŒ ع©ظ„غŒط¯ آ«ط¨ط§ط²ع¯ط´طھآ»
+   تاریخچه برای کلید «بازگشت»
 ========================================================= */
 
 async function pushStep(chatId, newState, newData) {
@@ -246,7 +246,7 @@ async function pushStep(chatId, newState, newData) {
     });
   }
 
-  // طھط§ط±غŒط®ع†ظ‡ ط¨غŒط´ ط§ط² ط­ط¯ ط¨ط²ط±ع¯ ظ†ط´ظˆط¯
+  // تاریخچه بیش از حد بزرگ نشود
   if (history.length > 20) history.splice(0, history.length - 20);
 
   await saveSession(chatId, newState, {
@@ -259,7 +259,7 @@ async function goBack(chatId) {
   const session = await getSession(chatId);
 
   if (!session) {
-    await sendMessage(chatId, "ًںڈ  طµظپط­ظ‡ ط§طµظ„غŒ", mainKeyboard());
+    await sendMessage(chatId, "🏠 صفحه اصلی", mainKeyboard());
     return;
   }
 
@@ -269,7 +269,7 @@ async function goBack(chatId) {
 
   if (!history.length) {
     await saveSession(chatId, "MAIN", {});
-    await sendMessage(chatId, "ًںڈ  طµظپط­ظ‡ ط§طµظ„غŒ", mainKeyboard());
+    await sendMessage(chatId, "🏠 صفحه اصلی", mainKeyboard());
     return;
   }
 
@@ -289,7 +289,7 @@ async function goBack(chatId) {
 
 async function baleRequest(method, body) {
   if (!BOT_TOKEN) {
-    throw new Error("BOT_TOKEN ط¯ط± Environment Variables طھظ†ط¸غŒظ… ظ†ط´ط¯ظ‡ ط§ط³طھ.");
+    throw new Error("BOT_TOKEN در Environment Variables تنظیم نشده است.");
   }
 
   const response = await fetch(
@@ -335,23 +335,23 @@ function isAdmin(chatId) {
 }
 
 /* =========================================================
-   ظ…ظ†ظˆظ‡ط§
+   منوها
 ========================================================= */
 
 function mainKeyboard() {
   return {
     keyboard: [
       [
-        { text: "ًںڈ¨ ط±ط²ط±ظˆ ظ‡طھظ„" },
-        { text: "ًںڑŒ طھظˆط±ظ‡ط§غŒ ظ…ط´ظ‡ط¯" }
+        { text: "🏨 رزرو هتل" },
+        { text: "🚌 تورهای مشهد" }
       ],
       [
-        { text: "ًں’ژ ط·ط±ط­ ط§ظ„ظ…ط§ط³ ط´ظ‡ط± ط¨ظ‡ط´طھ" },
-        { text: "ًں§³ ط®ط¯ظ…ط§طھ ع¯ط±ط¯ط´ع¯ط±غŒ" }
+        { text: "💎 طرح الماس شهر بهشت" },
+        { text: "🧳 خدمات گردشگری" }
       ],
       [
-        { text: "ًں“‍ طھظ…ط§ط³ ط¨ط§ ظ…ط§" },
-        { text: "ًں“¢ ع©ط§ظ†ط§ظ„" }
+        { text: "📞 تماس با ما" },
+        { text: "📢 کانال" }
       ]
     ],
     resize_keyboard: true
@@ -361,7 +361,7 @@ function mainKeyboard() {
 function backKeyboard() {
   return {
     inline_keyboard: [
-      [{ text: "ًں”™ ط¨ط§ط²ع¯ط´طھ", callback_data: "BACK" }]
+      [{ text: "🔙 بازگشت", callback_data: "BACK" }]
     ]
   };
 }
@@ -369,32 +369,32 @@ function backKeyboard() {
 function tourMenu() {
   return {
     inline_keyboard: [
-      [{ text: "âœˆï¸ڈ طھظˆط± ظ‡ظˆط§غŒغŒ", callback_data: "TOUR_AIR" }],
-      [{ text: "ًںڑ† طھظˆط± ط±غŒظ„غŒ", callback_data: "TOUR_RAIL" }],
-      [{ text: "ًںڑŒ طھظˆط± ط§طھظˆط¨ظˆط³غŒ", callback_data: "TOUR_BUS" }],
-      [{ text: "ًںڑچ ع©ط§ط±ظˆط§ظ† ط§طھظˆط¨ظˆط³غŒ", callback_data: "TOUR_CARAVAN_BUS" }],
-      [{ text: "ًںڑ† ع©ط§ط±ظˆط§ظ† ط±غŒظ„غŒ", callback_data: "TOUR_CARAVAN_RAIL" }],
-      [{ text: "ًںڈ¨ ظپظ‚ط· ظ‡طھظ„", callback_data: "TOUR_HOTEL" }],
-      [{ text: "ًں”™ ط¨ط§ط²ع¯ط´طھ", callback_data: "BACK_MAIN" }]
+      [{ text: "✈️ تور هوایی", callback_data: "TOUR_AIR" }],
+      [{ text: "🚆 تور ریلی", callback_data: "TOUR_RAIL" }],
+      [{ text: "🚌 تور اتوبوسی", callback_data: "TOUR_BUS" }],
+      [{ text: "🚍 کاروان اتوبوسی", callback_data: "TOUR_CARAVAN_BUS" }],
+      [{ text: "🚆 کاروان ریلی", callback_data: "TOUR_CARAVAN_RAIL" }],
+      [{ text: "🏨 فقط هتل", callback_data: "TOUR_HOTEL" }],
+      [{ text: "🔙 بازگشت", callback_data: "BACK_MAIN" }]
     ]
   };
 }
 
 const TYPE_NAMES = {
-  AIR: "âœˆï¸ڈ طھظˆط± ظ‡ظˆط§غŒغŒ",
-  RAIL: "ًںڑ† طھظˆط± ط±غŒظ„غŒ",
-  BUS: "ًںڑŒ طھظˆط± ط§طھظˆط¨ظˆط³غŒ",
-  CARAVAN_BUS: "ًںڑچ ع©ط§ط±ظˆط§ظ† ط§طھظˆط¨ظˆط³غŒ",
-  CARAVAN_RAIL: "ًںڑ† ع©ط§ط±ظˆط§ظ† ط±غŒظ„غŒ",
-  HOTEL: "ًںڈ¨ ظپظ‚ط· ظ‡طھظ„"
+  AIR: "✈️ تور هوایی",
+  RAIL: "🚆 تور ریلی",
+  BUS: "🚌 تور اتوبوسی",
+  CARAVAN_BUS: "🚍 کاروان اتوبوسی",
+  CARAVAN_RAIL: "🚆 کاروان ریلی",
+  HOTEL: "🏨 فقط هتل"
 };
 
 function paymentName(paymentType) {
-  return paymentType === "loan" ? "ًں’ژ ط·ط±ط­ ط§ظ„ظ…ط§ط³" : "ًں’µ ظ†ظ‚ط¯غŒ";
+  return paymentType === "loan" ? "💎 طرح الماس" : "💵 نقدی";
 }
 
 /* =========================================================
-   ط´ط±ظˆط¹ طھظˆط±ظ‡ط§
+   شروع تورها
 ========================================================= */
 
 async function startTours(chatId) {
@@ -402,7 +402,7 @@ async function startTours(chatId) {
 
   await sendMessage(
     chatId,
-    "ًںڑŒ طھظˆط±ظ‡ط§غŒ ظ…ط´ظ‡ط¯\n\nظ†ظˆط¹ ط³ظپط± ظ…ظˆط±ط¯ظ†ط¸ط± ط±ط§ ط§ظ†طھط®ط§ط¨ ع©ظ†غŒط¯:",
+    "🚌 تورهای مشهد\n\nنوع سفر موردنظر را انتخاب کنید:",
     tourMenu()
   );
 }
@@ -414,7 +414,7 @@ async function startTourType(chatId, type) {
 
   await sendMessage(
     chatId,
-    `${TYPE_NAMES[type]}\n\nًں“… طھط§ط±غŒط® ظˆط±ظˆط¯ ط¨ظ‡ ظ…ط´ظ‡ط¯ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.\n\nظ…ط«ط§ظ„: غ±غ´غ°غµ/غ°غ·/غ±غ°`,
+    `${TYPE_NAMES[type]}\n\n📅 تاریخ ورود به مشهد را وارد کنید.\n\nمثال: ۱۴۰۵/۰۷/۱۰`,
     backKeyboard()
   );
 }
@@ -426,20 +426,20 @@ async function startHotelOnly(chatId) {
 
   await sendMessage(
     chatId,
-    "ًںڈ¨ ظپظ‚ط· ظ‡طھظ„\n\nًں“… طھط§ط±غŒط® ظˆط±ظˆط¯ ط¨ظ‡ ظ…ط´ظ‡ط¯ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.\n\nظ…ط«ط§ظ„: غ±غ´غ°غµ/غ°غ·/غ±غ°",
+    "🏨 فقط هتل\n\n📅 تاریخ ورود به مشهد را وارد کنید.\n\nمثال: ۱۴۰۵/۰۷/۱۰",
     backKeyboard()
   );
 }
 
 /* =========================================================
-   ظ…ط±ط§ط­ظ„ ظپط±ظ…
+   مراحل فرم
 ========================================================= */
 
 async function askTourReturnDate(chatId, data) {
   await pushStep(chatId, "TOUR_RETURN_DATE", data);
   await sendMessage(
     chatId,
-    "ًں“… طھط§ط±غŒط® ط®ط±ظˆط¬ ط§ط² ظ…ط´ظ‡ط¯ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.\n\nظ…ط«ط§ظ„: غ±غ´غ°غµ/غ°غ·/غ±غ³",
+    "📅 تاریخ خروج از مشهد را وارد کنید.\n\nمثال: ۱۴۰۵/۰۷/۱۳",
     backKeyboard()
   );
 }
@@ -448,7 +448,7 @@ async function askTourNights(chatId, data) {
   await pushStep(chatId, "TOUR_NIGHTS", data);
   await sendMessage(
     chatId,
-    "ًںŒ™ طھط¹ط¯ط§ط¯ ط´ط¨ ط§ظ‚ط§ظ…طھ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.\n\nظ…ط«ظ„ط§ظ‹: غ³",
+    "🌙 تعداد شب اقامت را وارد کنید.\n\nمثلاً: ۳",
     backKeyboard()
   );
 }
@@ -457,7 +457,7 @@ async function askCaravanCount(chatId, data) {
   await pushStep(chatId, "CARAVAN_COUNT", data);
   await sendMessage(
     chatId,
-    "ًں‘¥ طھط¹ط¯ط§ط¯ ع©ظ„ ظ…ط³ط§ظپط±ط§ظ† ع©ط§ط±ظˆط§ظ† ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.\n\nظ…ط«ظ„ط§ظ‹: غ±غ°غ°\n\nطھط¹ط¯ط§ط¯ ظ…ط­ط¯ظˆط¯غŒطھغŒ ظ†ط¯ط§ط±ط¯.",
+    "👥 تعداد کل مسافران کاروان را وارد کنید.\n\nمثلاً: ۱۰۰\n\nتعداد محدودیتی ندارد.",
     backKeyboard()
   );
 }
@@ -466,7 +466,7 @@ async function askTourAdults(chatId, data) {
   await pushStep(chatId, "TOUR_ADULTS", data);
   await sendMessage(
     chatId,
-    "ًں‘¨ طھط¹ط¯ط§ط¯ ط¨ط²ط±ع¯ط³ط§ظ„ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.\n\nظ…ط«ظ„ط§ظ‹: غ²",
+    "👨 تعداد بزرگسال را وارد کنید.\n\nمثلاً: ۲",
     backKeyboard()
   );
 }
@@ -475,7 +475,7 @@ async function askTourChildren(chatId, data) {
   await pushStep(chatId, "TOUR_CHILDREN", data);
   await sendMessage(
     chatId,
-    "ًں‘§ طھط¹ط¯ط§ط¯ ع©ظˆط¯ع© غ³ طھط§ غµ ط³ط§ظ„ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.\n\nط§ع¯ط± ع©ظˆط¯ع© ظ†ط¯ط§ط±غŒط¯ غ° ظˆط§ط±ط¯ ع©ظ†غŒط¯.",
+    "👧 تعداد کودک ۳ تا ۵ سال را وارد کنید.\n\nاگر کودک ندارید ۰ وارد کنید.",
     backKeyboard()
   );
 }
@@ -484,7 +484,7 @@ async function askCaravanManager(chatId, data) {
   await pushStep(chatId, "CARAVAN_MANAGER", data);
   await sendMessage(
     chatId,
-    "ًں‘¤ ظ†ط§ظ… ظˆ ظ†ط§ظ… ط®ط§ظ†ظˆط§ط¯ع¯غŒ ظ…ط¯غŒط± ع©ط§ط±ظˆط§ظ† ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.",
+    "👤 نام و نام خانوادگی مدیر کاروان را وارد کنید.",
     backKeyboard()
   );
 }
@@ -494,12 +494,12 @@ async function askTourPayment(chatId, data) {
 
   await sendMessage(
     chatId,
-    "ًں’³ ظ†ظˆط¹ ظ¾ط±ط¯ط§ط®طھ ط±ط§ ط§ظ†طھط®ط§ط¨ ع©ظ†غŒط¯:",
+    "💳 نوع پرداخت را انتخاب کنید:",
     {
       inline_keyboard: [
-        [{ text: "ًں’µ ظ¾ط±ط¯ط§ط®طھ ظ†ظ‚ط¯غŒ", callback_data: "TOUR_PAYMENT_CASH" }],
-        [{ text: "ًں’ژ ط·ط±ط­ ط§ظ„ظ…ط§ط³ ط´ظ‡ط± ط¨ظ‡ط´طھ", callback_data: "TOUR_PAYMENT_LOAN" }],
-        [{ text: "ًں”™ ط¨ط§ط²ع¯ط´طھ", callback_data: "BACK" }]
+        [{ text: "💵 پرداخت نقدی", callback_data: "TOUR_PAYMENT_CASH" }],
+        [{ text: "💎 طرح الماس شهر بهشت", callback_data: "TOUR_PAYMENT_LOAN" }],
+        [{ text: "🔙 بازگشت", callback_data: "BACK" }]
       ]
     }
   );
@@ -507,63 +507,63 @@ async function askTourPayment(chatId, data) {
 
 async function askTourName(chatId, data) {
   await pushStep(chatId, "TOUR_NAME", data);
-  await sendMessage(chatId, "ًں‘¤ ظ„ط·ظپط§ظ‹ ظ†ط§ظ… ظˆ ظ†ط§ظ… ط®ط§ظ†ظˆط§ط¯ع¯غŒ ظ…طھظ‚ط§ط¶غŒ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.", backKeyboard());
+  await sendMessage(chatId, "👤 لطفاً نام و نام خانوادگی متقاضی را وارد کنید.", backKeyboard());
 }
 
 async function askTourPhone(chatId, data) {
   await pushStep(chatId, "TOUR_PHONE", data);
-  await sendMessage(chatId, "ًں“± ط´ظ…ط§ط±ظ‡ طھظ…ط§ط³ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.\n\nظ…ط«ط§ظ„: غ°غ¹غ±غ·غ·غ·غ°غ°غ¹غ¶غ±", backKeyboard());
+  await sendMessage(chatId, "📱 شماره تماس را وارد کنید.\n\nمثال: ۰۹۱۷۷۷۰۰۹۶۱", backKeyboard());
 }
 
 async function askTourNationalCode(chatId, data) {
   await pushStep(chatId, "TOUR_NATIONAL_CODE", data);
-  await sendMessage(chatId, "ًںھھ ع©ط¯ ظ…ظ„غŒ ظ…طھظ‚ط§ط¶غŒ ط§طµظ„غŒ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.", backKeyboard());
+  await sendMessage(chatId, "🪪 کد ملی متقاضی اصلی را وارد کنید.", backKeyboard());
 }
 
 /* =========================================================
-   طھط£غŒغŒط¯ ظ†ظ‡ط§غŒغŒ
+   تأیید نهایی
 ========================================================= */
 
 async function showTourConfirmation(chatId, data) {
   const totalPeople = Number(data.adults || 0) + Number(data.children || 0);
 
   let text =
-    "ًں“‹ ظ„ط·ظپط§ظ‹ ط§ط·ظ„ط§ط¹ط§طھ ط¯ط±ط®ظˆط§ط³طھ ط®ظˆط¯ ط±ط§ ط¨ط±ط±ط³غŒ ع©ظ†غŒط¯.\n\n" +
-    `ًںڑچ ظ†ظˆط¹ ط³ظپط±: ${TYPE_NAMES[data.tourType] || data.tourType}\n` +
-    `ًں“… ظˆط±ظˆط¯ ط¨ظ‡ ظ…ط´ظ‡ط¯: ${ltrDate(data.departureDate)}\n` +
-    `ًں“… ط®ط±ظˆط¬ ط§ط² ظ…ط´ظ‡ط¯: ${ltrDate(data.returnDate)}\n` +
-    `ًںŒ™ طھط¹ط¯ط§ط¯ ط´ط¨ ط§ظ‚ط§ظ…طھ: ${toPersianDigits(data.nights)} ط´ط¨\n` +
-    `ًں‘¨ ط¨ط²ط±ع¯ط³ط§ظ„: ${toPersianDigits(data.adults)} ظ†ظپط±\n` +
-    `ًں‘§ ع©ظˆط¯ع© غ³ طھط§ غµ ط³ط§ظ„: ${toPersianDigits(data.children)} ظ†ظپط±\n` +
-    `ًں‘¥ ظ…ط¬ظ…ظˆط¹ ظ…ط³ط§ظپط±ط§ظ†: ${toPersianDigits(totalPeople)} ظ†ظپط±\n`;
+    "📋 لطفاً اطلاعات درخواست خود را بررسی کنید.\n\n" +
+    `🚍 نوع سفر: ${TYPE_NAMES[data.tourType] || data.tourType}\n` +
+    `📅 ورود به مشهد: ${ltrDate(data.departureDate)}\n` +
+    `📅 خروج از مشهد: ${ltrDate(data.returnDate)}\n` +
+    `🌙 تعداد شب اقامت: ${toPersianDigits(data.nights)} شب\n` +
+    `👨 بزرگسال: ${toPersianDigits(data.adults)} نفر\n` +
+    `👧 کودک ۳ تا ۵ سال: ${toPersianDigits(data.children)} نفر\n` +
+    `👥 مجموع مسافران: ${toPersianDigits(totalPeople)} نفر\n`;
 
   if (data.tourType === "CARAVAN_BUS" || data.tourType === "CARAVAN_RAIL") {
-    text += `ًں‘¤ ظ…ط¯غŒط± ع©ط§ط±ظˆط§ظ†: ${data.caravanManager}\n`;
+    text += `👤 مدیر کاروان: ${data.caravanManager}\n`;
   }
 
   text +=
-    `ًں’³ ظ†ظˆط¹ ظ¾ط±ط¯ط§ط®طھ: ${paymentName(data.paymentType)}\n` +
-    `ًں‘¤ ظ†ط§ظ… ظˆ ظ†ط§ظ… ط®ط§ظ†ظˆط§ط¯ع¯غŒ: ${data.applicantName}\n` +
-    `ًں“± ط´ظ…ط§ط±ظ‡ طھظ…ط§ط³: ${toPersianDigits(data.phone)}\n`;
+    `💳 نوع پرداخت: ${paymentName(data.paymentType)}\n` +
+    `👤 نام و نام خانوادگی: ${data.applicantName}\n` +
+    `📱 شماره تماس: ${toPersianDigits(data.phone)}\n`;
 
   if (data.paymentType === "loan") {
-    text += `ًںھھ ع©ط¯ ظ…ظ„غŒ: ${toPersianDigits(data.nationalCode)}\n`;
+    text += `🪪 کد ملی: ${toPersianDigits(data.nationalCode)}\n`;
   }
 
-  text += "\nط¢غŒط§ ط§ط·ظ„ط§ط¹ط§طھ طµط­غŒط­ ط§ط³طھطں";
+  text += "\nآیا اطلاعات صحیح است؟";
 
   await sendMessage(chatId, text, {
     inline_keyboard: [
-      [{ text: "âœ… ط§ط±ط³ط§ظ„ ط¯ط±ط®ظˆط§ط³طھ ط¨ط±ط§غŒ ظ…ط¯غŒط±", callback_data: "TOUR_SUBMIT" }],
-      [{ text: "âœڈï¸ڈ ط§طµظ„ط§ط­ ط§ط·ظ„ط§ط¹ط§طھ", callback_data: "TOUR_EDIT" }],
-      [{ text: "â‌Œ ظ„ط؛ظˆ ط¯ط±ط®ظˆط§ط³طھ", callback_data: "TOUR_CANCEL" }],
-      [{ text: "ًں”™ ط¨ط§ط²ع¯ط´طھ", callback_data: "BACK" }]
+      [{ text: "✅ ارسال درخواست برای مدیر", callback_data: "TOUR_SUBMIT" }],
+      [{ text: "✏️ اصلاح اطلاعات", callback_data: "TOUR_EDIT" }],
+      [{ text: "❌ لغو درخواست", callback_data: "TOUR_CANCEL" }],
+      [{ text: "🔙 بازگشت", callback_data: "BACK" }]
     ]
   });
 }
 
 /* =========================================================
-   ظ¾ط±ط¯ط§ط²ط´ ظ…طھظ† ظپط±ظ…
+   پردازش متن فرم
 ========================================================= */
 
 async function handleTourText(chatId, text, session) {
@@ -572,7 +572,7 @@ async function handleTourText(chatId, text, session) {
   if (session.state === "TOUR_DATE") {
     const date = normalizeDate(text);
     if (!date) {
-      await sendMessage(chatId, "â‌Œ طھط§ط±غŒط® ظ†ط§ظ…ط¹طھط¨ط± ط§ط³طھ.\nظ…ط«ط§ظ„: غ±غ´غ°غµ/غ°غ·/غ±غ°", backKeyboard());
+      await sendMessage(chatId, "❌ تاریخ نامعتبر است.\nمثال: ۱۴۰۵/۰۷/۱۰", backKeyboard());
       return true;
     }
 
@@ -583,7 +583,7 @@ async function handleTourText(chatId, text, session) {
   if (session.state === "TOUR_RETURN_DATE") {
     const date = normalizeDate(text);
     if (!date) {
-      await sendMessage(chatId, "â‌Œ طھط§ط±غŒط® ظ†ط§ظ…ط¹طھط¨ط± ط§ط³طھ.\nظ…ط«ط§ظ„: غ±غ´غ°غµ/غ°غ·/غ±غ³", backKeyboard());
+      await sendMessage(chatId, "❌ تاریخ نامعتبر است.\nمثال: ۱۴۰۵/۰۷/۱۳", backKeyboard());
       return true;
     }
 
@@ -594,7 +594,7 @@ async function handleTourText(chatId, text, session) {
   if (session.state === "TOUR_NIGHTS") {
     const nights = parseInteger(text);
     if (nights === null) {
-      await sendMessage(chatId, "â‌Œ طھط¹ط¯ط§ط¯ ط´ط¨ ط§ظ‚ط§ظ…طھ ظ†ط§ظ…ط¹طھط¨ط± ط§ط³طھ.", backKeyboard());
+      await sendMessage(chatId, "❌ تعداد شب اقامت نامعتبر است.", backKeyboard());
       return true;
     }
 
@@ -609,7 +609,7 @@ async function handleTourText(chatId, text, session) {
   if (session.state === "TOUR_ADULTS") {
     const adults = parseInteger(text);
     if (adults === null) {
-      await sendMessage(chatId, "â‌Œ طھط¹ط¯ط§ط¯ ط¨ط²ط±ع¯ط³ط§ظ„ ط¨ط§غŒط¯ ط­ط¯ط§ظ‚ظ„ غ± ظ†ظپط± ط¨ط§ط´ط¯.", backKeyboard());
+      await sendMessage(chatId, "❌ تعداد بزرگسال باید حداقل ۱ نفر باشد.", backKeyboard());
       return true;
     }
 
@@ -620,7 +620,7 @@ async function handleTourText(chatId, text, session) {
   if (session.state === "CARAVAN_COUNT") {
     const passengerCount = parseInteger(text);
     if (passengerCount === null) {
-      await sendMessage(chatId, "â‌Œ طھط¹ط¯ط§ط¯ ظ…ط³ط§ظپط±ط§ظ† ط¨ط§غŒط¯ ط­ط¯ط§ظ‚ظ„ غ± ظ†ظپط± ط¨ط§ط´ط¯.", backKeyboard());
+      await sendMessage(chatId, "❌ تعداد مسافران باید حداقل ۱ نفر باشد.", backKeyboard());
       return true;
     }
 
@@ -636,7 +636,7 @@ async function handleTourText(chatId, text, session) {
   if (session.state === "TOUR_CHILDREN") {
     const children = parseInteger(text, true);
     if (children === null) {
-      await sendMessage(chatId, "â‌Œ طھط¹ط¯ط§ط¯ ع©ظˆط¯ع© ظ†ط§ظ…ط¹طھط¨ط± ط§ط³طھ.", backKeyboard());
+      await sendMessage(chatId, "❌ تعداد کودک نامعتبر است.", backKeyboard());
       return true;
     }
 
@@ -653,7 +653,7 @@ async function handleTourText(chatId, text, session) {
 
   if (session.state === "CARAVAN_MANAGER") {
     if (text.trim().length < 3) {
-      await sendMessage(chatId, "â‌Œ ظ„ط·ظپط§ظ‹ ظ†ط§ظ… ظˆ ظ†ط§ظ… ط®ط§ظ†ظˆط§ط¯ع¯غŒ ظ…ط¯غŒط± ع©ط§ط±ظˆط§ظ† ط±ط§ ع©ط§ظ…ظ„ ظˆط§ط±ط¯ ع©ظ†غŒط¯.", backKeyboard());
+      await sendMessage(chatId, "❌ لطفاً نام و نام خانوادگی مدیر کاروان را کامل وارد کنید.", backKeyboard());
       return true;
     }
 
@@ -666,7 +666,7 @@ async function handleTourText(chatId, text, session) {
 
   if (session.state === "TOUR_NAME") {
     if (text.trim().length < 3) {
-      await sendMessage(chatId, "â‌Œ ظ„ط·ظپط§ظ‹ ظ†ط§ظ… ظˆ ظ†ط§ظ… ط®ط§ظ†ظˆط§ط¯ع¯غŒ ع©ط§ظ…ظ„ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.", backKeyboard());
+      await sendMessage(chatId, "❌ لطفاً نام و نام خانوادگی کامل را وارد کنید.", backKeyboard());
       return true;
     }
 
@@ -680,7 +680,7 @@ async function handleTourText(chatId, text, session) {
   if (session.state === "TOUR_PHONE") {
     const phone = normalizePhone(text);
     if (!phone) {
-      await sendMessage(chatId, "â‌Œ ط´ظ…ط§ط±ظ‡ طھظ…ط§ط³ طµط­غŒط­ ظ†غŒط³طھ.\nظ…ط«ط§ظ„: غ°غ¹غ±غ·غ·غ·غ°غ°غ¹غ¶غ±", backKeyboard());
+      await sendMessage(chatId, "❌ شماره تماس صحیح نیست.\nمثال: ۰۹۱۷۷۷۰۰۹۶۱", backKeyboard());
       return true;
     }
 
@@ -695,7 +695,7 @@ async function handleTourText(chatId, text, session) {
   if (session.state === "TOUR_NATIONAL_CODE") {
     const nationalCode = normalizeNationalCode(text);
     if (!nationalCode) {
-      await sendMessage(chatId, "â‌Œ ع©ط¯ ظ…ظ„غŒ ط¨ط§غŒط¯ غ±غ° ط±ظ‚ظ… ط¨ط§ط´ط¯.", backKeyboard());
+      await sendMessage(chatId, "❌ کد ملی باید ۱۰ رقم باشد.", backKeyboard());
       return true;
     }
 
@@ -711,7 +711,7 @@ async function handleTourText(chatId, text, session) {
     const passengerList = Array.isArray(data.passengers) ? [...data.passengers] : [];
 
     if (text.trim().length < 3) {
-      await sendMessage(chatId, `â‌Œ ظ†ط§ظ… ظˆ ظ†ط§ظ… ط®ط§ظ†ظˆط§ط¯ع¯غŒ ظ…ط³ط§ظپط± ${toPersianDigits(index)} ط±ط§ ع©ط§ظ…ظ„ ظˆط§ط±ط¯ ع©ظ†غŒط¯.`, backKeyboard());
+      await sendMessage(chatId, `❌ نام و نام خانوادگی مسافر ${toPersianDigits(index)} را کامل وارد کنید.`, backKeyboard());
       return true;
     }
 
@@ -723,14 +723,14 @@ async function handleTourText(chatId, text, session) {
       passengers: passengerList
     });
 
-    await sendMessage(chatId, `ًںھھ ع©ط¯ ظ…ظ„غŒ ظ…ط³ط§ظپط± ${toPersianDigits(index)} ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.`, backKeyboard());
+    await sendMessage(chatId, `🪪 کد ملی مسافر ${toPersianDigits(index)} را وارد کنید.`, backKeyboard());
     return true;
   }
 
   if (session.state === "PASSENGER_NATIONAL") {
     const code = normalizeNationalCode(text);
     if (!code) {
-      await sendMessage(chatId, "â‌Œ ع©ط¯ ظ…ظ„غŒ ط¨ط§غŒط¯ غ±غ° ط±ظ‚ظ… ط¨ط§ط´ط¯.", backKeyboard());
+      await sendMessage(chatId, "❌ کد ملی باید ۱۰ رقم باشد.", backKeyboard());
       return true;
     }
 
@@ -744,7 +744,7 @@ async function handleTourText(chatId, text, session) {
 
     await sendMessage(
       chatId,
-      "ًںژ‚ طھط§ط±غŒط® طھظˆظ„ط¯ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.\n\nظپط±ظ…طھ طµط­غŒط­ ظˆ ط§ط² ع†ظ¾ ط¨ظ‡ ط±ط§ط³طھ:\n\n\u200E1362/06/17\u200E",
+      "🎂 تاریخ تولد را وارد کنید.\n\nفرمت صحیح و از چپ به راست:\n\n\u200E1362/06/17\u200E",
       backKeyboard()
     );
     return true;
@@ -755,7 +755,7 @@ async function handleTourText(chatId, text, session) {
     if (!birthDate) {
       await sendMessage(
         chatId,
-        "â‌Œ طھط§ط±غŒط® طھظˆظ„ط¯ ظ†ط§ظ…ط¹طھط¨ط± ط§ط³طھ.\nظپط±ظ…طھ طµط­غŒط­:\n\n\u200E1362/06/17\u200E",
+        "❌ تاریخ تولد نامعتبر است.\nفرمت صحیح:\n\n\u200E1362/06/17\u200E",
         backKeyboard()
       );
       return true;
@@ -789,7 +789,7 @@ async function handleTourText(chatId, text, session) {
 
     await sendMessage(
       chatId,
-      `ًں‘¤ ظ†ط§ظ… ظˆ ظ†ط§ظ… ط®ط§ظ†ظˆط§ط¯ع¯غŒ ظ…ط³ط§ظپط± ${toPersianDigits(nextIndex)} ط§ط² ${toPersianDigits(total)} ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.`,
+      `👤 نام و نام خانوادگی مسافر ${toPersianDigits(nextIndex)} از ${toPersianDigits(total)} را وارد کنید.`,
       backKeyboard()
     );
     return true;
@@ -799,118 +799,118 @@ async function handleTourText(chatId, text, session) {
 }
 
 /* =========================================================
-   ظ†ظ…ط§غŒط´ ط¯ظˆط¨ط§ط±ظ‡ ظ…ط±ط­ظ„ظ‡ ط¨ط±ط§غŒ ط¨ط±ع¯ط´طھ
+   نمایش دوباره مرحله برای برگشت
 ========================================================= */
 
 async function showStatePrompt(chatId, state, data) {
   switch (state) {
     case "MAIN":
-      await sendMessage(chatId, "ًںڈ  طµظپط­ظ‡ ط§طµظ„غŒ", mainKeyboard());
+      await sendMessage(chatId, "🏠 صفحه اصلی", mainKeyboard());
       return;
     case "TOUR_CATEGORY":
-      await sendMessage(chatId, "ًںڑŒ طھظˆط±ظ‡ط§غŒ ظ…ط´ظ‡ط¯\n\nظ†ظˆط¹ ط³ظپط± ظ…ظˆط±ط¯ظ†ط¸ط± ط±ط§ ط§ظ†طھط®ط§ط¨ ع©ظ†غŒط¯:", tourMenu());
+      await sendMessage(chatId, "🚌 تورهای مشهد\n\nنوع سفر موردنظر را انتخاب کنید:", tourMenu());
       return;
     case "TOUR_DATE":
-      await sendMessage(chatId, `${TYPE_NAMES[data.tourType] || "طھظˆط±"}\n\nًں“… طھط§ط±غŒط® ظˆط±ظˆط¯ ط¨ظ‡ ظ…ط´ظ‡ط¯ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.\n\nظ…ط«ط§ظ„: غ±غ´غ°غµ/غ°غ·/غ±غ°`, backKeyboard());
+      await sendMessage(chatId, `${TYPE_NAMES[data.tourType] || "تور"}\n\n📅 تاریخ ورود به مشهد را وارد کنید.\n\nمثال: ۱۴۰۵/۰۷/۱۰`, backKeyboard());
       return;
     case "TOUR_RETURN_DATE":
-      await sendMessage(chatId, "ًں“… طھط§ط±غŒط® ط®ط±ظˆط¬ ط§ط² ظ…ط´ظ‡ط¯ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.\n\nظ…ط«ط§ظ„: غ±غ´غ°غµ/غ°غ·/غ±غ³", backKeyboard());
+      await sendMessage(chatId, "📅 تاریخ خروج از مشهد را وارد کنید.\n\nمثال: ۱۴۰۵/۰۷/۱۳", backKeyboard());
       return;
     case "TOUR_NIGHTS":
-      await sendMessage(chatId, "ًںŒ™ طھط¹ط¯ط§ط¯ ط´ط¨ ط§ظ‚ط§ظ…طھ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.", backKeyboard());
+      await sendMessage(chatId, "🌙 تعداد شب اقامت را وارد کنید.", backKeyboard());
       return;
     case "CARAVAN_COUNT":
-      await sendMessage(chatId, "ًں‘¥ طھط¹ط¯ط§ط¯ ع©ظ„ ظ…ط³ط§ظپط±ط§ظ† ع©ط§ط±ظˆط§ظ† ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.\n\nظ…ط«ظ„ط§ظ‹: غ±غ°غ°\n\nطھط¹ط¯ط§ط¯ ظ…ط­ط¯ظˆط¯غŒطھغŒ ظ†ط¯ط§ط±ط¯.", backKeyboard());
+      await sendMessage(chatId, "👥 تعداد کل مسافران کاروان را وارد کنید.\n\nمثلاً: ۱۰۰\n\nتعداد محدودیتی ندارد.", backKeyboard());
       return;
     case "TOUR_ADULTS":
-      await sendMessage(chatId, "ًں‘¨ طھط¹ط¯ط§ط¯ ط¨ط²ط±ع¯ط³ط§ظ„ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.", backKeyboard());
+      await sendMessage(chatId, "👨 تعداد بزرگسال را وارد کنید.", backKeyboard());
       return;
     case "TOUR_CHILDREN":
-      await sendMessage(chatId, "ًں‘§ طھط¹ط¯ط§ط¯ ع©ظˆط¯ع© غ³ طھط§ غµ ط³ط§ظ„ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.\n\nط§ع¯ط± ع©ظˆط¯ع© ظ†ط¯ط§ط±غŒط¯ غ° ظˆط§ط±ط¯ ع©ظ†غŒط¯.", backKeyboard());
+      await sendMessage(chatId, "👧 تعداد کودک ۳ تا ۵ سال را وارد کنید.\n\nاگر کودک ندارید ۰ وارد کنید.", backKeyboard());
       return;
     case "CARAVAN_MANAGER":
-      await sendMessage(chatId, "ًں‘¤ ظ†ط§ظ… ظˆ ظ†ط§ظ… ط®ط§ظ†ظˆط§ط¯ع¯غŒ ظ…ط¯غŒط± ع©ط§ط±ظˆط§ظ† ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.", backKeyboard());
+      await sendMessage(chatId, "👤 نام و نام خانوادگی مدیر کاروان را وارد کنید.", backKeyboard());
       return;
     case "TOUR_PAYMENT":
-      await sendMessage(chatId, "ًں’³ ظ†ظˆط¹ ظ¾ط±ط¯ط§ط®طھ ط±ط§ ط§ظ†طھط®ط§ط¨ ع©ظ†غŒط¯:", {
+      await sendMessage(chatId, "💳 نوع پرداخت را انتخاب کنید:", {
         inline_keyboard: [
-          [{ text: "ًں’µ ظ¾ط±ط¯ط§ط®طھ ظ†ظ‚ط¯غŒ", callback_data: "TOUR_PAYMENT_CASH" }],
-          [{ text: "ًں’ژ ط·ط±ط­ ط§ظ„ظ…ط§ط³ ط´ظ‡ط± ط¨ظ‡ط´طھ", callback_data: "TOUR_PAYMENT_LOAN" }],
-          [{ text: "ًں”™ ط¨ط§ط²ع¯ط´طھ", callback_data: "BACK" }]
+          [{ text: "💵 پرداخت نقدی", callback_data: "TOUR_PAYMENT_CASH" }],
+          [{ text: "💎 طرح الماس شهر بهشت", callback_data: "TOUR_PAYMENT_LOAN" }],
+          [{ text: "🔙 بازگشت", callback_data: "BACK" }]
         ]
       });
       return;
     case "TOUR_NAME":
-      await sendMessage(chatId, "ًں‘¤ ظ„ط·ظپط§ظ‹ ظ†ط§ظ… ظˆ ظ†ط§ظ… ط®ط§ظ†ظˆط§ط¯ع¯غŒ ظ…طھظ‚ط§ط¶غŒ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.", backKeyboard());
+      await sendMessage(chatId, "👤 لطفاً نام و نام خانوادگی متقاضی را وارد کنید.", backKeyboard());
       return;
     case "TOUR_PHONE":
-      await sendMessage(chatId, "ًں“± ط´ظ…ط§ط±ظ‡ طھظ…ط§ط³ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.\n\nظ…ط«ط§ظ„: غ°غ¹غ±غ·غ·غ·غ°غ°غ¹غ¶غ±", backKeyboard());
+      await sendMessage(chatId, "📱 شماره تماس را وارد کنید.\n\nمثال: ۰۹۱۷۷۷۰۰۹۶۱", backKeyboard());
       return;
     case "TOUR_NATIONAL_CODE":
-      await sendMessage(chatId, "ًںھھ ع©ط¯ ظ…ظ„غŒ ظ…طھظ‚ط§ط¶غŒ ط§طµظ„غŒ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.", backKeyboard());
+      await sendMessage(chatId, "🪪 کد ملی متقاضی اصلی را وارد کنید.", backKeyboard());
       return;
     case "PASSENGER_NAME":
-      await sendMessage(chatId, `ًں‘¤ ظ†ط§ظ… ظˆ ظ†ط§ظ… ط®ط§ظ†ظˆط§ط¯ع¯غŒ ظ…ط³ط§ظپط± ${toPersianDigits(data.passengerIndex || 1)} ط§ط² ${toPersianDigits(data.passengerCount || 0)} ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.`, backKeyboard());
+      await sendMessage(chatId, `👤 نام و نام خانوادگی مسافر ${toPersianDigits(data.passengerIndex || 1)} از ${toPersianDigits(data.passengerCount || 0)} را وارد کنید.`, backKeyboard());
       return;
     case "PASSENGER_NATIONAL":
-      await sendMessage(chatId, `ًںھھ ع©ط¯ ظ…ظ„غŒ ظ…ط³ط§ظپط± ${toPersianDigits(data.passengerIndex || 1)} ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.`, backKeyboard());
+      await sendMessage(chatId, `🪪 کد ملی مسافر ${toPersianDigits(data.passengerIndex || 1)} را وارد کنید.`, backKeyboard());
       return;
     case "PASSENGER_BIRTH":
-      await sendMessage(chatId, "ًںژ‚ طھط§ط±غŒط® طھظˆظ„ط¯ ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.\n\nظپط±ظ…طھ طµط­غŒط­:\n\n\u200E1362/06/17\u200E", backKeyboard());
+      await sendMessage(chatId, "🎂 تاریخ تولد را وارد کنید.\n\nفرمت صحیح:\n\n\u200E1362/06/17\u200E", backKeyboard());
       return;
     default:
-      await sendMessage(chatId, "ًںڈ  طµظپط­ظ‡ ط§طµظ„غŒ", mainKeyboard());
+      await sendMessage(chatId, "🏠 صفحه اصلی", mainKeyboard());
   }
 }
 
 /* =========================================================
-   ط·ط±ط­ ط§ظ„ظ…ط§ط³
+   طرح الماس
 ========================================================= */
 
 function diamondPlanText() {
   return (
-    "ًں’ژ ط·ط±ط­ ط§ظ„ظ…ط§ط³ ط´ظ‡ط± ط¨ظ‡ط´طھ\n\n" +
-    "غ´غ° ط¯ط±طµط¯ ط¨ط§ طھظˆ / غ¶غ° ط¯ط±طµط¯ ط¨ط§ ظ…ط§\n\n" +
-    "ًں“Œ ظ…ط±ط§ط­ظ„:\n" +
-    "غ±ï¸ڈâƒ£ ظ†طµط¨ ط§ظ¾ظ„غŒع©غŒط´ظ† ع©غŒظˆط¨ط§ظ†ع© ظ…ظ‡ط±\n" +
-    "غ²ï¸ڈâƒ£ طھع©ظ…غŒظ„ ط§ط­ط±ط§ط² ظ‡ظˆغŒطھ\n" +
-    "غ³ï¸ڈâƒ£ ط§ظ†ط¬ط§ظ… ط§ط¹طھط¨ط§ط±ط³ظ†ط¬غŒ\n" +
-    "غ´ï¸ڈâƒ£ ط¯ط±غŒط§ظپطھ ط±طھط¨ظ‡ ط§ط¹طھط¨ط§ط±غŒ\n\n" +
-    "ًںں¢ ط±طھط¨ظ‡ A ظˆ B: ط¨ط¯ظˆظ† ط¶ط§ظ…ظ†ط› ط®ظˆط¯طھ ط¶ط§ظ…ظ† ط­ط³ط§ط¨طھ ظ‡ط³طھغŒ.\n\n" +
-    "ًںں، ط±طھط¨ظ‡ C ظˆ D ظˆ ظ¾ط§غŒغŒظ†â€Œطھط±: غŒع© ط¶ط§ظ…ظ† + ظ†ط§ظ…ظ‡ ع©ط³ط± ط§ط² ط­ظ‚ظˆظ‚ + ظپغŒط´ ط­ظ‚ظˆظ‚غŒ\n\n" +
-    "âڈ³ ط¨ط§ط²ظ¾ط±ط¯ط§ط®طھ: غ±غ² ظ…ط§ظ‡ظ‡\n" +
-    "ًں’° ع©ط§ط±ظ…ط²ط¯/ط³ظˆط¯: غ³ ط¯ط±طµط¯\n" +
-    "ًںڑ« ط¨ط¯ظˆظ† ظ…ط±ط§ط¬ط¹ظ‡ ط¨ظ‡ ط´ط¹ط¨ظ‡\n" +
-    "ًں“„ ط§طµظ„ ظ…ط¯ط§ط±ع© ط¨ط§غŒط¯ ط¨ط§ط±ع¯ط°ط§ط±غŒ ط´ظˆط¯.\n\n" +
-    "ظ¾ط³ ط§ط² ط¯ط±غŒط§ظپطھ ط±طھط¨ظ‡ ط§ط¹طھط¨ط§ط±غŒطŒ ع©ط¯ ظ…ظ„غŒ ظ…طھظ‚ط§ط¶غŒ ط§طµظ„غŒ ط±ط§ ط§ط±ط³ط§ظ„ ع©ظ†غŒط¯.\n\n" +
-    "ًں’³ ط¯ط± ط³ظپط± ط¨ط§ ط·ط±ط­ ط§ظ„ظ…ط§ط³طŒ ظ¾ط³ ط§ط² طھط£غŒغŒط¯ ط§ط·ظ„ط§ط¹ط§طھ ط­ط³ط§ط¨طŒ غ´غ°ظھ ظ‡ط²غŒظ†ظ‡ ع©ظ„ ط³ظپط± طھظˆط³ط· ظ…ط³ط§ظپط± ظ¾ط±ط¯ط§ط®طھ ظ…غŒâ€Œط´ظˆط¯.\n\n" +
-    "ًں§¾ ظ¾ط³ ط§ط² ط§ط±ط³ط§ظ„ ظپغŒط´ ظˆ ط¨ط±ط±ط³غŒ ط¢ظ†طŒ ظ…ط±ط§ط­ظ„ ظپط¹ط§ظ„â€Œط³ط§ط²غŒ ط§ظ†ط¬ط§ظ… ظ…غŒâ€Œط´ظˆط¯.\n\n" +
-    `ًں“‍ ظ¾ط´طھغŒط¨ط§ظ†غŒ: ${CONTACT_PHONE}`
+    "💎 طرح الماس شهر بهشت\n\n" +
+    "۴۰ درصد با تو / ۶۰ درصد با ما\n\n" +
+    "📌 مراحل:\n" +
+    "۱️⃣ نصب اپلیکیشن کیوبانک مهر\n" +
+    "۲️⃣ تکمیل احراز هویت\n" +
+    "۳️⃣ انجام اعتبارسنجی\n" +
+    "۴️⃣ دریافت رتبه اعتباری\n\n" +
+    "🟢 رتبه A و B: بدون ضامن؛ خودت ضامن حسابت هستی.\n\n" +
+    "🟡 رتبه C و D و پایین‌تر: یک ضامن + نامه کسر از حقوق + فیش حقوقی\n\n" +
+    "⏳ بازپرداخت: ۱۲ ماهه\n" +
+    "💰 کارمزد/سود: ۳ درصد\n" +
+    "🚫 بدون مراجعه به شعبه\n" +
+    "📄 اصل مدارک باید بارگذاری شود.\n\n" +
+    "پس از دریافت رتبه اعتباری، کد ملی متقاضی اصلی را ارسال کنید.\n\n" +
+    "💳 در سفر با طرح الماس، پس از تأیید اطلاعات حساب، ۴۰٪ هزینه کل سفر توسط مسافر پرداخت می‌شود.\n\n" +
+    "🧾 پس از ارسال فیش و بررسی آن، مراحل فعال‌سازی انجام می‌شود.\n\n" +
+    `📞 پشتیبانی: ${CONTACT_PHONE}`
   );
 }
 
 async function sendDiamondPlan(chatId) {
   await sendMessage(chatId, diamondPlanText(), {
     inline_keyboard: [
-      [{ text: "ًں“² ظ†طµط¨ ع©غŒظˆط¨ط§ظ†ع© ظ…ظ‡ط±", url: "https://qbank24.ir/downloads" }],
-      [{ text: "ًں”™ ط¨ط§ط²ع¯ط´طھ", callback_data: "BACK_MAIN" }]
+      [{ text: "📲 نصب کیوبانک مهر", url: "https://qbank24.ir/downloads" }],
+      [{ text: "🔙 بازگشت", callback_data: "BACK_MAIN" }]
     ]
   });
 }
 
 /* =========================================================
-   ط§ط·ظ„ط§ط¹ط§طھ ط­ط³ط§ط¨
+   اطلاعات حساب
 ========================================================= */
 
 function cashAccountText() {
   return (
-    "ًں’µ ط§ط·ظ„ط§ط¹ط§طھ ظˆط§ط±غŒط²\n\n" +
-    "ًںڈ¦ ط¨ط§ظ†ع©: ظ…ظ‡ط± ط§غŒط±ط§ظ†\n" +
-    "ًں‘¤ ط¨ظ‡ ظ†ط§ظ…: ظ…ظ‡ط¯غŒ ط±ط´غŒط¯غŒط§ظ† ط·ط±ظ‚غŒ\n\n" +
-    "ًں’³ ط´ظ…ط§ط±ظ‡ ع©ط§ط±طھ:\n6063731161437174\n\n" +
-    "ًںڈ¦ ط´ظ…ط§ط±ظ‡ ط­ط³ط§ط¨:\n363470014517217001\n\n" +
-    "ًں”— ط´ظ…ط§ط±ظ‡ ط´ط¨ط§:\nIR160600363470014517217001\n\n" +
-    "âڑ ï¸ڈ ظ¾ط³ ط§ط² ظˆط§ط±غŒط²طŒ طھطµظˆغŒط± ظپغŒط´ ط±ط§ ط§ط±ط³ط§ظ„ ع©ظ†غŒط¯."
+    "💵 اطلاعات واریز\n\n" +
+    "🏦 بانک: مهر ایران\n" +
+    "👤 به نام: مهدی رشیدیان طرقی\n\n" +
+    "💳 شماره کارت:\n6063731161437174\n\n" +
+    "🏦 شماره حساب:\n363470014517217001\n\n" +
+    "🔗 شماره شبا:\nIR160600363470014517217001\n\n" +
+    "⚠️ پس از واریز، تصویر فیش را ارسال کنید."
   );
 }
 
@@ -920,24 +920,24 @@ function diamondPaymentText(request) {
   if (total > 0) {
     const forty = Math.ceil(total * 0.4);
     return (
-      "ًں’ژ ط¯ط±ط®ظˆط§ط³طھ ط·ط±ط­ ط§ظ„ظ…ط§ط³ طھط£غŒغŒط¯ ط´ط¯.\n\n" +
-      `ًں†” ط¯ط±ط®ظˆط§ط³طھ: ${request.request_code}\n` +
-      `ًں’° ظ‡ط²غŒظ†ظ‡ ع©ظ„: ${toPersianDigits(total)} طھظˆظ…ط§ظ†\n` +
-      `ًں’³ ط³ظ‡ظ… ظ…ط³ط§ظپط± غ´غ°ظھ: ${toPersianDigits(forty)} طھظˆظ…ط§ظ†\n\n` +
-      "ظ„ط·ظپط§ظ‹ غ´غ°ظھ ط±ط§ ظ¾ط±ط¯ط§ط®طھ ظˆ طھطµظˆغŒط± ظپغŒط´ ط±ط§ ط§ط±ط³ط§ظ„ ع©ظ†غŒط¯."
+      "💎 درخواست طرح الماس تأیید شد.\n\n" +
+      `🆔 درخواست: ${request.request_code}\n` +
+      `💰 هزینه کل: ${toPersianDigits(total)} تومان\n` +
+      `💳 سهم مسافر ۴۰٪: ${toPersianDigits(forty)} تومان\n\n` +
+      "لطفاً ۴۰٪ را پرداخت و تصویر فیش را ارسال کنید."
     );
   }
 
   return (
-    "ًں’ژ ط¯ط±ط®ظˆط§ط³طھ ط·ط±ط­ ط§ظ„ظ…ط§ط³ طھط£غŒغŒط¯ ط´ط¯.\n\n" +
-    `ًں†” ط¯ط±ط®ظˆط§ط³طھ: ${request.request_code}\n\n` +
-    "ظ¾ط³ ط§ط² طھع©ظ…غŒظ„ ظ…ط±ط§ط­ظ„ ط·ط±ط­ ظˆ طھط£غŒغŒط¯ ط§ط·ظ„ط§ط¹ط§طھ ط­ط³ط§ط¨طŒ غ´غ°ظھ ظ‡ط²غŒظ†ظ‡ ع©ظ„ ط³ظپط± ظ¾ط±ط¯ط§ط®طھ ظ…غŒâ€Œط´ظˆط¯.\n\n" +
-    "ًں§¾ طھطµظˆغŒط± ظپغŒط´ ظˆط§ط±غŒط²غŒ ط±ط§ ط§ط±ط³ط§ظ„ ع©ظ†غŒط¯."
+    "💎 درخواست طرح الماس تأیید شد.\n\n" +
+    `🆔 درخواست: ${request.request_code}\n\n` +
+    "پس از تکمیل مراحل طرح و تأیید اطلاعات حساب، ۴۰٪ هزینه کل سفر پرداخت می‌شود.\n\n" +
+    "🧾 تصویر فیش واریزی را ارسال کنید."
   );
 }
 
 /* =========================================================
-   ط«ط¨طھ ط¯ط±ط®ظˆط§ط³طھ ط¯ط± ط¯غŒطھط§ط¨غŒط³ ظˆ ع¯ط±ظˆظ‡
+   ثبت درخواست در دیتابیس و گروه
 ========================================================= */
 
 function makeRequestCode() {
@@ -948,14 +948,14 @@ async function submitTourRequest(chatId) {
   const session = await getSession(chatId);
 
   if (!session) {
-    await sendMessage(chatId, "â‌Œ ط§ط·ظ„ط§ط¹ط§طھ ط¯ط±ط®ظˆط§ط³طھ ظ¾غŒط¯ط§ ظ†ط´ط¯. ظ„ط·ظپط§ظ‹ ط¯ظˆط¨ط§ط±ظ‡ ط´ط±ظˆط¹ ع©ظ†غŒط¯.", mainKeyboard());
+    await sendMessage(chatId, "❌ اطلاعات درخواست پیدا نشد. لطفاً دوباره شروع کنید.", mainKeyboard());
     return;
   }
 
   const data = session.data || {};
   const requestCode = makeRequestCode();
-  const username = data.messageInfo?.username || "ظ†ط¯ط§ط±ط¯";
-  const firstName = data.messageInfo?.firstName || "ع©ط§ط±ط¨ط±";
+  const username = data.messageInfo?.username || "ندارد";
+  const firstName = data.messageInfo?.firstName || "کاربر";
 
   const payload = {
     tourType: data.tourType,
@@ -997,37 +997,37 @@ async function submitTourRequest(chatId) {
   const totalPeople = payload.passengerCount;
 
   let adminText =
-    "ًں“‹ ط¯ط±ط®ظˆط§ط³طھ ط¬ط¯غŒط¯ ط³ظپط±\n\n" +
-    `ًں†” ط´ظ…ط§ط±ظ‡ ط¯ط±ط®ظˆط§ط³طھ: ${requestCode}\n\n` +
-    `ًںڑچ ظ†ظˆط¹ ط³ظپط±: ${TYPE_NAMES[payload.tourType] || payload.tourType}\n` +
-    `ًں“… ظˆط±ظˆط¯ ط¨ظ‡ ظ…ط´ظ‡ط¯: ${ltrDate(payload.departureDate)}\n` +
-    `ًں“… ط®ط±ظˆط¬ ط§ط² ظ…ط´ظ‡ط¯: ${ltrDate(payload.returnDate)}\n` +
-    `ًںŒ™ طھط¹ط¯ط§ط¯ ط´ط¨ ط§ظ‚ط§ظ…طھ: ${toPersianDigits(payload.nights)} ط´ط¨\n` +
-    `ًں‘¨ ط¨ط²ط±ع¯ط³ط§ظ„: ${toPersianDigits(payload.adults)} ظ†ظپط±\n` +
-    `ًں‘§ ع©ظˆط¯ع© غ³ طھط§ غµ ط³ط§ظ„: ${toPersianDigits(payload.children)} ظ†ظپط±\n` +
-    `ًں‘¥ ظ…ط¬ظ…ظˆط¹ ظ…ط³ط§ظپط±ط§ظ†: ${toPersianDigits(totalPeople)} ظ†ظپط±\n`;
+    "📋 درخواست جدید سفر\n\n" +
+    `🆔 شماره درخواست: ${requestCode}\n\n` +
+    `🚍 نوع سفر: ${TYPE_NAMES[payload.tourType] || payload.tourType}\n` +
+    `📅 ورود به مشهد: ${ltrDate(payload.departureDate)}\n` +
+    `📅 خروج از مشهد: ${ltrDate(payload.returnDate)}\n` +
+    `🌙 تعداد شب اقامت: ${toPersianDigits(payload.nights)} شب\n` +
+    `👨 بزرگسال: ${toPersianDigits(payload.adults)} نفر\n` +
+    `👧 کودک ۳ تا ۵ سال: ${toPersianDigits(payload.children)} نفر\n` +
+    `👥 مجموع مسافران: ${toPersianDigits(totalPeople)} نفر\n`;
 
   if (payload.tourType === "CARAVAN_BUS" || payload.tourType === "CARAVAN_RAIL") {
-    adminText += `ًں‘¤ ظ…ط¯غŒط± ع©ط§ط±ظˆط§ظ†: ${payload.caravanManager}\n`;
+    adminText += `👤 مدیر کاروان: ${payload.caravanManager}\n`;
   }
 
   adminText +=
-    `ًں’³ ظ¾ط±ط¯ط§ط®طھ: ${paymentName(payload.paymentType)}\n` +
-    `ًں‘¤ ظ…طھظ‚ط§ط¶غŒ: ${payload.applicantName}\n` +
-    `ًں“± طھظ…ط§ط³: ${toPersianDigits(payload.phone)}\n` +
-    (payload.paymentType === "loan" ? `ًںھھ ع©ط¯ ظ…ظ„غŒ: ${toPersianDigits(payload.nationalCode)}\n` : "") +
-    `\nًں‘¤ ع©ط§ط±ط¨ط± ط¨ظ„ظ‡: ${username}\n` +
-    `ًں†” Bale ID: ${chatId}`;
+    `💳 پرداخت: ${paymentName(payload.paymentType)}\n` +
+    `👤 متقاضی: ${payload.applicantName}\n` +
+    `📱 تماس: ${toPersianDigits(payload.phone)}\n` +
+    (payload.paymentType === "loan" ? `🪪 کد ملی: ${toPersianDigits(payload.nationalCode)}\n` : "") +
+    `\n👤 کاربر بله: ${username}\n` +
+    `🆔 Bale ID: ${chatId}`;
 
   if (!ADMIN_CHAT_ID) {
-    throw new Error("ADMIN_CHAT_ID ط¯ط± Environment Variables طھظ†ط¸غŒظ… ظ†ط´ط¯ظ‡ ط§ط³طھ.");
+    throw new Error("ADMIN_CHAT_ID در Environment Variables تنظیم نشده است.");
   }
 
   await sendMessage(ADMIN_CHAT_ID, adminText, {
     inline_keyboard: [
       [
-        { text: "âœ… طھط£غŒغŒط¯ ط¯ط±ط®ظˆط§ط³طھ", callback_data: `APPROVE_REQUEST:${requestCode}` },
-        { text: "â‌Œ ط±ط¯ ط¯ط±ط®ظˆط§ط³طھ", callback_data: `REJECT_REQUEST:${requestCode}` }
+        { text: "✅ تأیید درخواست", callback_data: `APPROVE_REQUEST:${requestCode}` },
+        { text: "❌ رد درخواست", callback_data: `REJECT_REQUEST:${requestCode}` }
       ]
     ]
   });
@@ -1036,15 +1036,15 @@ async function submitTourRequest(chatId) {
 
   await sendMessage(
     chatId,
-    "âœ… ط¯ط±ط®ظˆط§ط³طھ ط´ظ…ط§ ط¨ط§ ظ…ظˆظپظ‚غŒطھ ط¨ط±ط§غŒ ظ…ط¯غŒط± ط§ط±ط³ط§ظ„ ط´ط¯.\n\n" +
-    `ًں†” ط´ظ…ط§ط±ظ‡ ط¯ط±ط®ظˆط§ط³طھ: ${requestCode}\n\n` +
-    "ظ¾ط³ ط§ط² ط¨ط±ط±ط³غŒطŒ ظ†طھغŒط¬ظ‡ ط¨ظ‡ ط´ظ…ط§ ط§ط·ظ„ط§ط¹ ط¯ط§ط¯ظ‡ ظ…غŒâ€Œط´ظˆط¯.",
+    "✅ درخواست شما با موفقیت برای مدیر ارسال شد.\n\n" +
+    `🆔 شماره درخواست: ${requestCode}\n\n` +
+    "پس از بررسی، نتیجه به شما اطلاع داده می‌شود.",
     mainKeyboard()
   );
 }
 
 /* =========================================================
-   ظ¾ط³ ط§ط² طھط£غŒغŒط¯ ظ…ط¯غŒط±
+   پس از تأیید مدیر
 ========================================================= */
 
 async function approveRequest(adminChatId, code) {
@@ -1056,7 +1056,7 @@ async function approveRequest(adminChatId, code) {
   );
 
   if (!result.rows.length) {
-    await sendMessage(adminChatId, "â‌Œ ط¯ط±ط®ظˆط§ط³طھ ظ¾غŒط¯ط§ ظ†ط´ط¯.");
+    await sendMessage(adminChatId, "❌ درخواست پیدا نشد.");
     return;
   }
 
@@ -1068,25 +1068,25 @@ async function approveRequest(adminChatId, code) {
     [code]
   );
 
-  await sendMessage(adminChatId, `âœ… ط¯ط±ط®ظˆط§ط³طھ ${code} طھط£غŒغŒط¯ ط´ط¯.`);
+  await sendMessage(adminChatId, `✅ درخواست ${code} تأیید شد.`);
 
-  // ظپظ‚ط· ظ‡طھظ„: ظ‡غŒع† ظ„غŒط³طھ ظ‡ظ…ط±ط§ظ‡ط§ظ†غŒ ط¯ط±ط®ظˆط§ط³طھ ظ†ظ…غŒâ€Œط´ظˆط¯.
+  // فقط هتل: هیچ لیست همراهانی درخواست نمی‌شود.
   if (payload.tourType === "HOTEL") {
     if (request.payment_type === "cash") {
       await sendMessage(
         request.user_id,
-        "âœ… ط±ط²ط±ظˆ ظپظ‚ط· ظ‡طھظ„ ط´ظ…ط§ طھط£غŒغŒط¯ ظˆ ط«ط¨طھ ظ‚ط·ط¹غŒ ط´ط¯.\n\n" +
+        "✅ رزرو فقط هتل شما تأیید و ثبت قطعی شد.\n\n" +
         cashAccountText() +
-        `\n\nًں†” ط´ظ…ط§ط±ظ‡ ط¯ط±ط®ظˆط§ط³طھ: ${code}`
+        `\n\n🆔 شماره درخواست: ${code}`
       );
     } else {
       await sendMessage(
         request.user_id,
-        "âœ… ط¯ط±ط®ظˆط§ط³طھ ظپظ‚ط· ظ‡طھظ„ ط´ظ…ط§ طھط£غŒغŒط¯ ظˆ ط«ط¨طھ ظ‚ط·ط¹غŒ ط´ط¯.\n\n" +
+        "✅ درخواست فقط هتل شما تأیید و ثبت قطعی شد.\n\n" +
         diamondPaymentText(request),
         {
           inline_keyboard: [
-            [{ text: "ًں“² ظ†طµط¨ ع©غŒظˆط¨ط§ظ†ع© ظ…ظ‡ط±", url: "https://qbank24.ir/downloads" }]
+            [{ text: "📲 نصب کیوبانک مهر", url: "https://qbank24.ir/downloads" }]
           ]
         }
       );
@@ -1094,16 +1094,16 @@ async function approveRequest(adminChatId, code) {
     return;
   }
 
-  // ع©ط§ط±ظˆط§ظ†â€Œظ‡ط§ ظ‡ظ…غŒط´ظ‡ ظپط§غŒظ„ ظ„غŒط³طھ ظ…غŒâ€Œع¯غŒط±ظ†ط¯.
+  // کاروان‌ها همیشه فایل لیست می‌گیرند.
   if (payload.tourType === "CARAVAN_BUS" || payload.tourType === "CARAVAN_RAIL") {
     await askPassengerFile(
       request.user_id,
       code,
       payload.tourType,
-      payload.caravanManager || "ط«ط¨طھ ظ†ط´ط¯ظ‡"
+      payload.caravanManager || "ثبت نشده"
     );
   } else {
-    // طھظˆط±ظ‡ط§غŒ ط¹ط§ط¯غŒ: طھط§ غ±غ° ظ†ظپط± ظˆط±ظˆط¯ ط¯ط³طھغŒط› ط¨غŒط´طھط± ط§ط² ط¢ظ† ظپط§غŒظ„.
+    // تورهای عادی: تا ۱۰ نفر ورود دستی؛ بیشتر از آن فایل.
     const total = Number(payload.adults || 0) + Number(payload.children || 0);
 
     if (total <= MANUAL_PASSENGER_LIMIT) {
@@ -1116,9 +1116,9 @@ async function approveRequest(adminChatId, code) {
   if (request.payment_type === "cash") {
     await sendMessage(
       request.user_id,
-      "ًں’µ ط¯ط±ط®ظˆط§ط³طھ ط³ظپط± ط´ظ…ط§ طھط£غŒغŒط¯ ط´ط¯.\n\n" +
+      "💵 درخواست سفر شما تأیید شد.\n\n" +
       cashAccountText() +
-      `\n\nًں†” ط´ظ…ط§ط±ظ‡ ط¯ط±ط®ظˆط§ط³طھ: ${code}`
+      `\n\n🆔 شماره درخواست: ${code}`
     );
   }
 
@@ -1126,17 +1126,17 @@ async function approveRequest(adminChatId, code) {
     await sendMessage(
       request.user_id,
       diamondPaymentText(request) +
-      "\n\nًں“Œ ظ…ط±ط§ط­ظ„ ط·ط±ط­ ط§ظ„ظ…ط§ط³:\n" +
-      "غ±ï¸ڈâƒ£ ظ†طµط¨ ع©غŒظˆط¨ط§ظ†ع© ظ…ظ‡ط±\n" +
-      "غ²ï¸ڈâƒ£ ط§ط­ط±ط§ط² ظ‡ظˆغŒطھ\n" +
-      "غ³ï¸ڈâƒ£ ط§ط¹طھط¨ط§ط±ط³ظ†ط¬غŒ\n" +
-      "غ´ï¸ڈâƒ£ ط¯ط±غŒط§ظپطھ ط±طھط¨ظ‡ ط§ط¹طھط¨ط§ط±غŒ\n\n" +
-      "ًںں¢ ط±طھط¨ظ‡ A ظˆ B: ط¨ط¯ظˆظ† ط¶ط§ظ…ظ†\n" +
-      "ًںں، ط±طھط¨ظ‡ C ظˆ D ظˆ ظ¾ط§غŒغŒظ†â€Œطھط±: غŒع© ط¶ط§ظ…ظ† + ظ†ط§ظ…ظ‡ ع©ط³ط± ط§ط² ط­ظ‚ظˆظ‚ + ظپغŒط´ ط­ظ‚ظˆظ‚غŒ\n\n" +
-      "ًں“„ ط§طµظ„ ظ…ط¯ط§ط±ع© ط¨ط§غŒط¯ ط¨ط§ط±ع¯ط°ط§ط±غŒ ط´ظˆط¯.",
+      "\n\n📌 مراحل طرح الماس:\n" +
+      "۱️⃣ نصب کیوبانک مهر\n" +
+      "۲️⃣ احراز هویت\n" +
+      "۳️⃣ اعتبارسنجی\n" +
+      "۴️⃣ دریافت رتبه اعتباری\n\n" +
+      "🟢 رتبه A و B: بدون ضامن\n" +
+      "🟡 رتبه C و D و پایین‌تر: یک ضامن + نامه کسر از حقوق + فیش حقوقی\n\n" +
+      "📄 اصل مدارک باید بارگذاری شود.",
       {
         inline_keyboard: [
-          [{ text: "ًں“² ظ†طµط¨ ع©غŒظˆط¨ط§ظ†ع© ظ…ظ‡ط±", url: "https://qbank24.ir/downloads" }]
+          [{ text: "📲 نصب کیوبانک مهر", url: "https://qbank24.ir/downloads" }]
         ]
       }
     );
@@ -1144,7 +1144,7 @@ async function approveRequest(adminChatId, code) {
 }
 
 /* =========================================================
-   ظپط§غŒظ„ ظ„غŒط³طھ ظ…ط³ط§ظپط±ط§ظ†
+   فایل لیست مسافران
 ========================================================= */
 
 async function askPassengerFile(chatId, requestCode, tourType, caravanManager) {
@@ -1157,27 +1157,27 @@ async function askPassengerFile(chatId, requestCode, tourType, caravanManager) {
   if (tourType === "CARAVAN_BUS" || tourType === "CARAVAN_RAIL") {
     await sendMessage(
       chatId,
-      "ًں“‹ ط¯ط±ط®ظˆط§ط³طھ ط´ظ…ط§ طھط£غŒغŒط¯ ط´ط¯.\n\n" +
-      "ظ„ط·ظپط§ظ‹ ظپط§غŒظ„ ظ„غŒط³طھ ع©ط§ظ…ظ„ ظ…ط³ط§ظپط±ط§ظ† ط±ط§ ط¨ط§ط±ع¯ط°ط§ط±غŒ ع©ظ†غŒط¯.\n\n" +
-      "ًں‘¤ ظ†ط§ظ… ظˆ ظ†ط§ظ… ط®ط§ظ†ظˆط§ط¯ع¯غŒ\n" +
-      "ًںھھ ع©ط¯ ظ…ظ„غŒ\n" +
-      "ًںژ‚ طھط§ط±غŒط® طھظˆظ„ط¯\n\n" +
-      "ظپط±ظ…طھ طھط§ط±غŒط® طھظˆظ„ط¯:\n\n\u200E1362/06/17\u200E\n\n" +
-      `ًں‘¤ ظ…ط¯غŒط± ع©ط§ط±ظˆط§ظ†: ${caravanManager || "ط«ط¨طھ ظ†ط´ط¯ظ‡"}\n` +
-      `ًں†” ط´ظ…ط§ط±ظ‡ ط¯ط±ط®ظˆط§ط³طھ: ${requestCode}`,
+      "📋 درخواست شما تأیید شد.\n\n" +
+      "لطفاً فایل لیست کامل مسافران را بارگذاری کنید.\n\n" +
+      "👤 نام و نام خانوادگی\n" +
+      "🪪 کد ملی\n" +
+      "🎂 تاریخ تولد\n\n" +
+      "فرمت تاریخ تولد:\n\n\u200E1362/06/17\u200E\n\n" +
+      `👤 مدیر کاروان: ${caravanManager || "ثبت نشده"}\n` +
+      `🆔 شماره درخواست: ${requestCode}`,
       backKeyboard()
     );
   } else {
     await sendMessage(
       chatId,
-      "ًں“‹ ط¯ط±ط®ظˆط§ط³طھ ط´ظ…ط§ طھط£غŒغŒط¯ ط´ط¯.\n\n" +
-      "طھط¹ط¯ط§ط¯ ظ…ط³ط§ظپط±ط§ظ† ط¨غŒط´طھط± ط§ط² غ±غ° ظ†ظپط± ط§ط³طھط› ظ„ط·ظپط§ظ‹ ظپط§غŒظ„ ظ„غŒط³طھ ظ…ط³ط§ظپط±ط§ظ† ط±ط§ ط¨ط§ط±ع¯ط°ط§ط±غŒ ع©ظ†غŒط¯.\n\n" +
-      "ظ…ط´ط®طµط§طھ ظ‡ط± ظ…ط³ط§ظپط±:\n" +
-      "ًں‘¤ ظ†ط§ظ… ظˆ ظ†ط§ظ… ط®ط§ظ†ظˆط§ط¯ع¯غŒ\n" +
-      "ًںھھ ع©ط¯ ظ…ظ„غŒ\n" +
-      "ًںژ‚ طھط§ط±غŒط® طھظˆظ„ط¯\n\n" +
-      "ظپط±ظ…طھ طھط§ط±غŒط® طھظˆظ„ط¯:\n\n\u200E1362/06/17\u200E\n\n" +
-      `ًں†” ط´ظ…ط§ط±ظ‡ ط¯ط±ط®ظˆط§ط³طھ: ${requestCode}`,
+      "📋 درخواست شما تأیید شد.\n\n" +
+      "تعداد مسافران بیشتر از ۱۰ نفر است؛ لطفاً فایل لیست مسافران را بارگذاری کنید.\n\n" +
+      "مشخصات هر مسافر:\n" +
+      "👤 نام و نام خانوادگی\n" +
+      "🪪 کد ملی\n" +
+      "🎂 تاریخ تولد\n\n" +
+      "فرمت تاریخ تولد:\n\n\u200E1362/06/17\u200E\n\n" +
+      `🆔 شماره درخواست: ${requestCode}`,
       backKeyboard()
     );
   }
@@ -1191,16 +1191,16 @@ async function forwardPassengerDocument(message, session) {
   const manager = session.data.caravanManager || "";
 
   let caption =
-    "ًں“‹ ظپط§غŒظ„ ظ„غŒط³طھ ظ…ط³ط§ظپط±ط§ظ†\n\n" +
-    `ًں†” ط¯ط±ط®ظˆط§ط³طھ: ${requestCode}\n` +
-    `ًںڑچ ظ†ظˆط¹: ${TYPE_NAMES[tourType] || tourType}\n`;
+    "📋 فایل لیست مسافران\n\n" +
+    `🆔 درخواست: ${requestCode}\n` +
+    `🚍 نوع: ${TYPE_NAMES[tourType] || tourType}\n`;
 
-  if (manager) caption += `ًں‘¤ ظ…ط¯غŒط± ع©ط§ط±ظˆط§ظ†: ${manager}\n`;
+  if (manager) caption += `👤 مدیر کاروان: ${manager}\n`;
 
   caption +=
-    `ًں‘¤ ع©ط§ط±ط¨ط±: ${getFirstName(message)}\n` +
-    `ًں”¹ ${getUsername(message) || "ط¨ط¯ظˆظ† ظ†ط§ظ… ع©ط§ط±ط¨ط±غŒ"}\n` +
-    `ًں†” Bale ID: ${getUserId(message)}`;
+    `👤 کاربر: ${getFirstName(message)}\n` +
+    `🔹 ${getUsername(message) || "بدون نام کاربری"}\n` +
+    `🆔 Bale ID: ${getUserId(message)}`;
 
   try {
     await baleRequest("sendDocument", {
@@ -1218,21 +1218,21 @@ async function forwardPassengerDocument(message, session) {
 
     await sendMessage(
       getChatId(message),
-      "âœ… ظپط§غŒظ„ ظ„غŒط³طھ ظ…ط³ط§ظپط±ط§ظ† ط¨ط§ ظ…ظˆظپظ‚غŒطھ ط¨ط±ط§غŒ ظ…ط¯غŒط± ط§ط±ط³ط§ظ„ ط´ط¯.\n\n" +
-      `ًں†” ط´ظ…ط§ط±ظ‡ ط¯ط±ط®ظˆط§ط³طھ: ${requestCode}`,
+      "✅ فایل لیست مسافران با موفقیت برای مدیر ارسال شد.\n\n" +
+      `🆔 شماره درخواست: ${requestCode}`,
       mainKeyboard()
     );
 
     return true;
   } catch (error) {
-    console.error("â‌Œ Send passenger file error:", error);
-    await sendMessage(getChatId(message), "â‌Œ ط§ط±ط³ط§ظ„ ظپط§غŒظ„ ط§ظ†ط¬ط§ظ… ظ†ط´ط¯.\nظ„ط·ظپط§ظ‹ ط¯ظˆط¨ط§ط±ظ‡ ظپط§غŒظ„ ط±ط§ ط§ط±ط³ط§ظ„ ع©ظ†غŒط¯.", backKeyboard());
+    console.error("❌ Send passenger file error:", error);
+    await sendMessage(getChatId(message), "❌ ارسال فایل انجام نشد.\nلطفاً دوباره فایل را ارسال کنید.", backKeyboard());
     return true;
   }
 }
 
 /* =========================================================
-   ظ„غŒط³طھ ط¯ط³طھغŒ ط¨ط±ط§غŒ ط­ط¯ط§ع©ط«ط± غ±غ° ظ†ظپط±
+   لیست دستی برای حداکثر ۱۰ نفر
 ========================================================= */
 
 async function askManualPassengerList(chatId, requestCode, count, tourType) {
@@ -1244,14 +1244,14 @@ async function askManualPassengerList(chatId, requestCode, count, tourType) {
 
   await sendMessage(
     chatId,
-    "ًں“‹ ط¯ط±ط®ظˆط§ط³طھ ط´ظ…ط§ طھط£غŒغŒط¯ ط´ط¯.\n\n" +
-    `طھط¹ط¯ط§ط¯ ظ…ط³ط§ظپط±ط§ظ†: ${toPersianDigits(count)} ظ†ظپط±\n\n` +
-    "ع©ظ„غŒط¯ آ«ظ„غŒط³طھ ظ‡ظ…ط±ط§ظ‡ط§ظ†آ» ط±ط§ ط¨ط²ظ†غŒط¯ طھط§ ظ…ط´ط®طµط§طھ ظ…ط³ط§ظپط±ط§ظ† ط¨ظ‡ طھط±طھغŒط¨ ط¯ط±غŒط§ظپطھ ط´ظˆط¯.\n" +
-    "طھط¹ط¯ط§ط¯ ط§ط·ظ„ط§ط¹ط§طھ ظ‚ط§ط¨ظ„ ط«ط¨طھ ط¯ظ‚غŒظ‚ط§ظ‹ ط¨ط±ط§ط¨ط± ط¨ط§ طھط¹ط¯ط§ط¯ ظ…ط³ط§ظپط±ط§ظ† ط§ط³طھ ظˆ ظ†ظپط± ط§ط¶ط§ظپظ‡ ظ¾ط°غŒط±ظپطھظ‡ ظ†ظ…غŒâ€Œط´ظˆط¯.",
+    "📋 درخواست شما تأیید شد.\n\n" +
+    `تعداد مسافران: ${toPersianDigits(count)} نفر\n\n` +
+    "کلید «لیست همراهان» را بزنید تا مشخصات مسافران به ترتیب دریافت شود.\n" +
+    "تعداد اطلاعات قابل ثبت دقیقاً برابر با تعداد مسافران است و نفر اضافه پذیرفته نمی‌شود.",
     {
       inline_keyboard: [
-        [{ text: "ًں“‹ ظ„غŒط³طھ ظ‡ظ…ط±ط§ظ‡ط§ظ†", callback_data: "PASSENGER_START" }],
-        [{ text: "ًں”™ ط¨ط§ط²ع¯ط´طھ", callback_data: "BACK_MAIN" }]
+        [{ text: "📋 لیست همراهان", callback_data: "PASSENGER_START" }],
+        [{ text: "🔙 بازگشت", callback_data: "BACK_MAIN" }]
       ]
     }
   );
@@ -1268,7 +1268,7 @@ async function startManualPassengerEntry(chatId, session) {
 
   await sendMessage(
     chatId,
-    `ًں‘¤ ظ†ط§ظ… ظˆ ظ†ط§ظ… ط®ط§ظ†ظˆط§ط¯ع¯غŒ ظ…ط³ط§ظپط± غ± ط§ط² ${toPersianDigits(session.data.passengerCount)} ط±ط§ ظˆط§ط±ط¯ ع©ظ†غŒط¯.`,
+    `👤 نام و نام خانوادگی مسافر ۱ از ${toPersianDigits(session.data.passengerCount)} را وارد کنید.`,
     backKeyboard()
   );
 }
@@ -1277,20 +1277,20 @@ async function submitManualPassengers(chatId, data) {
   const passengers = Array.isArray(data.passengers) ? data.passengers : [];
 
   if (passengers.length !== Number(data.passengerCount)) {
-    await sendMessage(chatId, "â‌Œ طھط¹ط¯ط§ط¯ ظ…ط´ط®طµط§طھ ط¨ط§ طھط¹ط¯ط§ط¯ ظ…ط³ط§ظپط±ط§ظ† ط¨ط±ط§ط¨ط± ظ†غŒط³طھ.", backKeyboard());
+    await sendMessage(chatId, "❌ تعداد مشخصات با تعداد مسافران برابر نیست.", backKeyboard());
     return;
   }
 
   const lines = passengers.map((p, i) =>
     `${toPersianDigits(i + 1)}. ${p.name}\n` +
-    `   ًںھھ ${toPersianDigits(p.nationalCode)}\n` +
-    `   ًںژ‚ ${ltrDate(p.birthDate)}`
+    `   🪪 ${toPersianDigits(p.nationalCode)}\n` +
+    `   🎂 ${ltrDate(p.birthDate)}`
   );
 
   const text =
-    "ًں“‹ ظ„غŒط³طھ ظ…ط³ط§ظپط±ط§ظ† ط¯ط±ط®ظˆط§ط³طھ\n\n" +
-    `ًں†” ط¯ط±ط®ظˆط§ط³طھ: ${data.requestCode}\n` +
-    `ًںڑچ ظ†ظˆط¹ ط³ظپط±: ${TYPE_NAMES[data.tourType] || data.tourType}\n\n` +
+    "📋 لیست مسافران درخواست\n\n" +
+    `🆔 درخواست: ${data.requestCode}\n` +
+    `🚍 نوع سفر: ${TYPE_NAMES[data.tourType] || data.tourType}\n\n` +
     lines.join("\n\n");
 
   await sendMessage(ADMIN_CHAT_ID, text);
@@ -1304,14 +1304,14 @@ async function submitManualPassengers(chatId, data) {
 
   await sendMessage(
     chatId,
-    "âœ… ط§ط·ظ„ط§ط¹ط§طھ ظ„غŒط³طھ ظ…ط³ط§ظپط±ط§ظ† ط¨ط§ ظ…ظˆظپظ‚غŒطھ ط¨ط±ط§غŒ ظ…ط¯غŒط± ط§ط±ط³ط§ظ„ ط´ط¯.\n\n" +
-    `ًں†” ط´ظ…ط§ط±ظ‡ ط¯ط±ط®ظˆط§ط³طھ: ${data.requestCode}`,
+    "✅ اطلاعات لیست مسافران با موفقیت برای مدیر ارسال شد.\n\n" +
+    `🆔 شماره درخواست: ${data.requestCode}`,
     mainKeyboard()
   );
 }
 
 /* =========================================================
-   Callback ظ‡ط§غŒ ظپط±ظ…
+   Callback های فرم
 ========================================================= */
 
 async function handleCallback(callback) {
@@ -1325,7 +1325,7 @@ async function handleCallback(callback) {
 
   if (data === "BACK_MAIN") {
     await clearSession(chatId);
-    await sendMessage(chatId, "ًںڈ  طµظپط­ظ‡ ط§طµظ„غŒ", mainKeyboard());
+    await sendMessage(chatId, "🏠 صفحه اصلی", mainKeyboard());
     return;
   }
 
@@ -1391,13 +1391,13 @@ async function handleCallback(callback) {
       history: []
     });
 
-    await sendMessage(chatId, "ًں“… طھط§ط±غŒط® ظˆط±ظˆط¯ ط¨ظ‡ ظ…ط´ظ‡ط¯ ط±ط§ ط¯ظˆط¨ط§ط±ظ‡ ظˆط§ط±ط¯ ع©ظ†غŒط¯.", backKeyboard());
+    await sendMessage(chatId, "📅 تاریخ ورود به مشهد را دوباره وارد کنید.", backKeyboard());
     return;
   }
 
   if (data === "TOUR_CANCEL") {
     await clearSession(chatId);
-    await sendMessage(chatId, "â‌Œ ط¯ط±ط®ظˆط§ط³طھ ظ„ط؛ظˆ ط´ط¯.", mainKeyboard());
+    await sendMessage(chatId, "❌ درخواست لغو شد.", mainKeyboard());
     return;
   }
 
@@ -1421,7 +1421,7 @@ async function handleCallback(callback) {
     const result = await pool.query(`SELECT * FROM requests WHERE request_code=$1`, [code]);
 
     if (!result.rows.length) {
-      await sendMessage(chatId, "â‌Œ ط¯ط±ط®ظˆط§ط³طھ ظ¾غŒط¯ط§ ظ†ط´ط¯.");
+      await sendMessage(chatId, "❌ درخواست پیدا نشد.");
       return;
     }
 
@@ -1430,11 +1430,11 @@ async function handleCallback(callback) {
       [code]
     );
 
-    await sendMessage(chatId, `â‌Œ ط¯ط±ط®ظˆط§ط³طھ ${code} ط±ط¯ ط´ط¯.`);
+    await sendMessage(chatId, `❌ درخواست ${code} رد شد.`);
     await sendMessage(
       result.rows[0].user_id,
-      "â‌Œ ط¯ط±ط®ظˆط§ط³طھ ط´ظ…ط§ طھظˆط³ط· ظ…ط¯غŒط± طھط£غŒغŒط¯ ظ†ط´ط¯.\n\n" +
-      `ًں†” ط´ظ…ط§ط±ظ‡ ط¯ط±ط®ظˆط§ط³طھ: ${code}\n\nâکژï¸ڈ ${CONTACT_PHONE}`,
+      "❌ درخواست شما توسط مدیر تأیید نشد.\n\n" +
+      `🆔 شماره درخواست: ${code}\n\n☎️ ${CONTACT_PHONE}`,
       mainKeyboard()
     );
     return;
@@ -1442,7 +1442,7 @@ async function handleCallback(callback) {
 }
 
 /* =========================================================
-   ظ¾غŒط§ظ…â€Œظ‡ط§غŒ ظ…طھظ†غŒ
+   پیام‌های متنی
 ========================================================= */
 
 async function handleMessage(message) {
@@ -1451,7 +1451,7 @@ async function handleMessage(message) {
 
   const session = await getSession(chatId);
 
-  // ظپط§غŒظ„ ظ„غŒط³طھ ظ…ط³ط§ظپط±ط§ظ†
+  // فایل لیست مسافران
   if (message.document && session?.state === "WAITING_PASSENGER_FILE") {
     await forwardPassengerDocument(message, session);
     return;
@@ -1464,56 +1464,56 @@ async function handleMessage(message) {
     await saveSession(chatId, "MAIN", {});
     await sendMessage(
       chatId,
-      "ًںŒ¹ ط¨ظ‡ ط±ط¨ط§طھ ط³ظپط± ظ…ط´ظ‡ط¯ طھظˆط³ ط®ظˆط´ ط¢ظ…ط¯غŒط¯.\n\nط¨ط±ط§غŒ ط¯ط±غŒط§ظپطھ ط®ط¯ظ…ط§طھ ع¯ط±ط¯ط´ع¯ط±غŒ ع¯ط²غŒظ†ظ‡ ظ…ظˆط±ط¯ظ†ط¸ط± ط±ط§ ط§ظ†طھط®ط§ط¨ ع©ظ†غŒط¯.",
+      "🌹 به ربات سفر مشهد توس خوش آمدید.\n\nبرای دریافت خدمات گردشگری گزینه موردنظر را انتخاب کنید.",
       mainKeyboard()
     );
     return;
   }
 
-  if (text === "ًںڑŒ طھظˆط±ظ‡ط§غŒ ظ…ط´ظ‡ط¯") {
+  if (text === "🚌 تورهای مشهد") {
     await startTours(chatId);
     return;
   }
 
-  if (text === "ًںڈ¨ ط±ط²ط±ظˆ ظ‡طھظ„") {
-    await sendMessage(chatId, "ًںڈ¨ ط±ط²ط±ظˆ ظ‡طھظ„ ط§ط² ط§غŒظ† ط¨ط®ط´ ظپط¹ظ„ط§ظ‹ ط؛غŒط±ظپط¹ط§ظ„ ط§ط³طھ.\n\nط¨ط±ط§غŒ ط±ط²ط±ظˆ ظپظ‚ط· ظ‡طھظ„طŒ ط§ط² ظ…ط³غŒط± آ«ًںڑŒ طھظˆط±ظ‡ط§غŒ ظ…ط´ظ‡ط¯آ» ع¯ط²غŒظ†ظ‡ آ«ًںڈ¨ ظپظ‚ط· ظ‡طھظ„آ» ط±ط§ ط§ظ†طھط®ط§ط¨ ع©ظ†غŒط¯.", mainKeyboard());
+  if (text === "🏨 رزرو هتل") {
+    await sendMessage(chatId, "🏨 رزرو هتل از این بخش فعلاً غیرفعال است.\n\nبرای رزرو فقط هتل، از مسیر «🚌 تورهای مشهد» گزینه «🏨 فقط هتل» را انتخاب کنید.", mainKeyboard());
     return;
   }
 
-  if (text === "ًں’ژ ط·ط±ط­ ط§ظ„ظ…ط§ط³ ط´ظ‡ط± ط¨ظ‡ط´طھ") {
+  if (text === "💎 طرح الماس شهر بهشت") {
     await sendDiamondPlan(chatId);
     return;
   }
 
-  if (text === "ًں§³ ط®ط¯ظ…ط§طھ ع¯ط±ط¯ط´ع¯ط±غŒ") {
+  if (text === "🧳 خدمات گردشگری") {
     await sendMessage(
       chatId,
-      "ًں§³ ط®ط¯ظ…ط§طھ ع¯ط±ط¯ط´ع¯ط±غŒ\n\n" +
-      "âœˆï¸ڈ طھظˆط±ظ‡ط§غŒ ظ‡ظˆط§غŒغŒ\n" +
-      "ًںڑ† طھظˆط±ظ‡ط§غŒ ط±غŒظ„غŒ\n" +
-      "ًںڑŒ طھظˆط±ظ‡ط§غŒ ط§طھظˆط¨ظˆط³غŒ\n" +
-      "ًںڑچ ع©ط§ط±ظˆط§ظ†â€Œظ‡ط§غŒ ط²غŒط§ط±طھغŒ\n" +
-      "ًںڈ¨ ظپظ‚ط· ظ‡طھظ„\n\n" +
-      `âکژï¸ڈ ${CONTACT_PHONE}`,
+      "🧳 خدمات گردشگری\n\n" +
+      "✈️ تورهای هوایی\n" +
+      "🚆 تورهای ریلی\n" +
+      "🚌 تورهای اتوبوسی\n" +
+      "🚍 کاروان‌های زیارتی\n" +
+      "🏨 فقط هتل\n\n" +
+      `☎️ ${CONTACT_PHONE}`,
       mainKeyboard()
     );
     return;
   }
 
-  if (text === "ًں“‍ طھظ…ط§ط³ ط¨ط§ ظ…ط§") {
+  if (text === "📞 تماس با ما") {
     await sendMessage(
       chatId,
-      "ًں“‍ طھظ…ط§ط³ ط¨ط§ ظ…ط§\n\n" +
-      `ًں‘¤ ${ADMIN_NAME}\n` +
-      `âکژï¸ڈ ${CONTACT_PHONE}\n` +
+      "📞 تماس با ما\n\n" +
+      `👤 ${ADMIN_NAME}\n` +
+      `☎️ ${CONTACT_PHONE}\n` +
       `${WEBSITE_URL}`,
       mainKeyboard()
     );
     return;
   }
 
-  if (text === "ًں“¢ ع©ط§ظ†ط§ظ„") {
-    await sendMessage(chatId, `ًں“¢ ع©ط§ظ†ط§ظ„ ط³ظپط± ظ…ط´ظ‡ط¯ طھظˆط³\n\n${CHANNEL_URL}`, mainKeyboard());
+  if (text === "📢 کانال") {
+    await sendMessage(chatId, `📢 کانال سفر مشهد توس\n\n${CHANNEL_URL}`, mainKeyboard());
     return;
   }
 
@@ -1522,7 +1522,7 @@ async function handleMessage(message) {
     if (handled) return;
   }
 
-  await sendMessage(chatId, "ظ„ط·ظپط§ظ‹ غŒع©غŒ ط§ط² ع¯ط²غŒظ†ظ‡â€Œظ‡ط§غŒ ظ…ظ†ظˆ ط±ط§ ط§ظ†طھط®ط§ط¨ ع©ظ†غŒط¯.", mainKeyboard());
+  await sendMessage(chatId, "لطفاً یکی از گزینه‌های منو را انتخاب کنید.", mainKeyboard());
 }
 
 /* =========================================================
@@ -1543,12 +1543,12 @@ app.post("/webhook", async (req, res) => {
       await handleCallback(update.callback_query);
     }
   } catch (error) {
-    console.error("â‌Œ Webhook error:", error);
+    console.error("❌ Webhook error:", error);
   }
 });
 
 app.get("/", (req, res) => {
-  res.send("Safar Mashhad Toos Bot is running âœ…");
+  res.send("Safar Mashhad Toos Bot is running ✅");
 });
 
 /* =========================================================
@@ -1560,12 +1560,12 @@ async function startServer() {
     await initDB();
 
     app.listen(PORT, "0.0.0.0", () => {
-      console.log(`ًںڑ€ Server running on port ${PORT}`);
-      console.log(`ًں‘¤ ADMIN_CHAT_ID: ${ADMIN_CHAT_ID || "undefined"}`);
-      console.log(`ًں”‘ BOT_TOKEN: ${BOT_TOKEN ? "configured" : "undefined"}`);
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`👤 ADMIN_CHAT_ID: ${ADMIN_CHAT_ID || "undefined"}`);
+      console.log(`🔑 BOT_TOKEN: ${BOT_TOKEN ? "configured" : "undefined"}`);
     });
   } catch (error) {
-    console.error("â‌Œ Startup error:", error);
+    console.error("❌ Startup error:", error);
     process.exit(1);
   }
 }

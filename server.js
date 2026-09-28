@@ -296,7 +296,7 @@ async function baleRequest(method, body) {
     `${BALE_API_BASE}${BOT_TOKEN}/${method}`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json; charset=utf-8", "Accept": "application/json" },
       body: JSON.stringify(body)
     }
   );
@@ -1037,7 +1037,10 @@ async function submitTourRequest(chatId) {
   await sendMessage(
     chatId,
     "✅ درخواست شما با موفقیت برای مدیر ارسال شد.\n\n" +
-    `🆔 شماره درخواست: ${requestCode}\n\n` +
+    `🆔 شماره درخواست: ${requestCode}\n` +
+    `👤 شناسه کاربری بله: ${chatId}\n` +
+    `🔹 نام کاربری بله: ${username}\n\n` +
+    "این شناسه را برای ارتباط مستقیم با پشتیبانی نزد خود نگه دارید.\n" +
     "پس از بررسی، نتیجه به شما اطلاع داده می‌شود.",
     mainKeyboard()
   );

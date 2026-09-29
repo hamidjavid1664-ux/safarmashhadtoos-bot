@@ -10,7 +10,10 @@ const app = express();
 
 app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const BALE_API_BASE = process.env.BALE_API_BASE || "https://tapi.bale.ai/bot";
 
 
 /* =========================================================
@@ -394,7 +397,7 @@ async function baleRequest(
 ) {
 
   const token =
-    CONFIG.BOT_TOKEN;
+    BOT_TOKEN;
 
   if (!token) {
 
@@ -404,7 +407,7 @@ async function baleRequest(
   }
 
   const url =
-    `${CONFIG.BALE_API_BASE}${token}/${method}`;
+    `${BALE_API_BASE}${token}/${method}`;
 
   const response =
     await fetch(
@@ -505,48 +508,55 @@ async function answerCallback(
 
 
 /* =========================================================
-   دسترسی و محاسبات مدیر
-========================================================= */
-function isAdmin(chatId){ return String(chatId)===String(CONFIG.ADMIN_CHAT_ID); }
-function managerCalculationKeyboard(){return {inline_keyboard:[[{text:"🚆 محاسبه تور ریلی",callback_data:"ADMIN_RAIL_CALC"}],[{text:"✈️ محاسبه تور هوایی",callback_data:"ADMIN_AIR_CALC"}],[{text:"🚌 محاسبه تور اتوبوسی",callback_data:"ADMIN_BUS_CALC"}],[{text:"🚍 محاسبه کاروان اتوبوسی",callback_data:"ADMIN_CARAVAN_BUS_CALC"}],[{text:"🚆 محاسبه کاروان ریلی",callback_data:"ADMIN_CARAVAN_RAIL_CALC"}],[{text:"🏨 محاسبه فقط هتل",callback_data:"ADMIN_HOTEL_CALC"}],[{text:"💎 محاسبه طرح الماس",callback_data:"ADMIN_DIAMOND_CALC"}],[{text:"🔙 خروج",callback_data:"ADMIN_CALC_EXIT"}]]};}
-async function showManagerCalculations(chatId){if(!isAdmin(chatId))return;await saveSession(chatId,"ADMIN_CALC_MENU",{});await sendMessage(chatId,"🧮 محاسبات مدیر\n\nنوع محاسبه را انتخاب کنید:",managerCalculationKeyboard());}
-async function startManualManagerCalc(chatId,type){if(!isAdmin(chatId))return;await saveSession(chatId,"ADMIN_CALC_ADULTS",{type});await sendMessage(chatId,`نوع محاسبه: ${type}\n\n👨 تعداد بزرگسال را وارد کنید:`);}
-async function handleManagerCalculationText(chatId,text,session){if(!isAdmin(chatId)||!session||!session.state.startsWith("ADMIN_CALC_"))return false;const d=session.data||{},v=Number(toEnglishDigits(text).replace(/[^\d]/g,""));if(session.state==="ADMIN_CALC_ADULTS"){if(!Number.isInteger(v)||v<=0){await sendMessage(chatId,"❌ تعداد بزرگسال نامعتبر است.");return true;}await saveSession(chatId,"ADMIN_CALC_CHILDREN",{...d,adults:v});await sendMessage(chatId,"👧 تعداد کودک ۳ تا ۵ سال را وارد کنید:");return true;}if(session.state==="ADMIN_CALC_CHILDREN"){if(!Number.isInteger(v)||v<0){await sendMessage(chatId,"❌ تعداد کودک نامعتبر است.");return true;}await saveSession(chatId,"ADMIN_CALC_NIGHTS",{...d,children:v});await sendMessage(chatId,"🌙 تعداد شب اقامت را وارد کنید:");return true;}if(session.state==="ADMIN_CALC_NIGHTS"){if(!Number.isInteger(v)||v<=0){await sendMessage(chatId,"❌ تعداد شب نامعتبر است.");return true;}await saveSession(chatId,"ADMIN_CALC_TICKET",{...d,nights:v});await sendMessage(chatId,"🎫 قیمت بلیت/هزینه رفت‌وبرگشت هر بزرگسال را وارد کنید:");return true;}if(session.state==="ADMIN_CALC_TICKET"){if(v<0){await sendMessage(chatId,"❌ مبلغ نامعتبر است.");return true;}await saveSession(chatId,"ADMIN_CALC_HOTEL",{...d,ticketAdult:v});await sendMessage(chatId,"🏨 قیمت هتل هر بزرگسال برای هر شب را وارد کنید (پیش‌فرض ۲۳۰۰۰۰۰):");return true;}if(session.state==="ADMIN_CALC_HOTEL"){if(v<0){await sendMessage(chatId,"❌ مبلغ نامعتبر است.");return true;}await saveSession(chatId,"ADMIN_CALC_PAYMENT",{...d,hotelAdult:v||2300000});await sendMessage(chatId,"💳 نوع پرداخت را انتخاب کنید:",{inline_keyboard:[[{text:"💵 نقدی",callback_data:"ADMIN_MANUAL_CASH"}],[{text:"💎 طرح الماس",callback_data:"ADMIN_MANUAL_LOAN"}]]});return true;}return false;}
-async function startRailCalculation(chatId){
-  if(!isAdmin(chatId)) return;
-  await saveSession(chatId,"RAILCALC_ROUTE",{});
-  const routes=CONFIG.RAIL?.TICKET_PRICES||{};
-  const rows=[];
-  for(const [key,val] of Object.entries(routes)) rows.push([{text:`🚆 ${val.name||key}`,callback_data:`RAILCALC_ROUTE:${key}`}]);
-  rows.push([{text:"🔙 خروج",callback_data:"ADMIN_CALC_EXIT"}]);
-  await sendMessage(chatId,"🚆 محاسبه تور ریلی\n\nمسیر را انتخاب کنید:",{inline_keyboard:rows});
-}
-
-async function handleRailCalculationText(chatId,text,session){
-  if(!isAdmin(chatId)||!session||!session.state.startsWith("RAILCALC_")) return false;
-  const d=session.data||{};
-  const v=Number(toEnglishDigits(text).replace(/[^\d]/g,""));
-  if(session.state==="RAILCALC_ADULTS"){if(!Number.isInteger(v)||v<=0){await sendMessage(chatId,"❌ تعداد بزرگسال نامعتبر است.");return true;}await saveSession(chatId,"RAILCALC_CHILDREN",{...d,adults:v});await sendMessage(chatId,"👧 تعداد کودک را وارد کنید:");return true;}
-  if(session.state==="RAILCALC_CHILDREN"){if(!Number.isInteger(v)||v<0){await sendMessage(chatId,"❌ تعداد کودک نامعتبر است.");return true;}await saveSession(chatId,"RAILCALC_NIGHTS",{...d,children:v});await sendMessage(chatId,"🌙 تعداد شب اقامت را وارد کنید:");return true;}
-  if(session.state==="RAILCALC_NIGHTS"){if(!Number.isInteger(v)||v<=0){await sendMessage(chatId,"❌ تعداد شب نامعتبر است.");return true;}await saveSession(chatId,"RAILCALC_HOTEL",{...d,nights:v});await sendMessage(chatId,"🏨 قیمت هتل هر بزرگسال برای هر شب را وارد کنید:");return true;}
-  if(session.state==="RAILCALC_HOTEL"){if(v<0){await sendMessage(chatId,"❌ مبلغ نامعتبر است.");return true;}await saveSession(chatId,"RAILCALC_PRIVATE",{...d,hotelPricePerPersonPerNight:v||2300000});await sendMessage(chatId,"🚃 برای تعداد فرد ۳ یا ۵ نفر، کوپه اختصاصی می‌خواهید؟",{inline_keyboard:[[{text:"✅ بله",callback_data:"RAILCALC_PRIVATE_YES"}],[{text:"❌ خیر",callback_data:"RAILCALC_PRIVATE_NO"}]]});return true;}
-  return false;
-}
-
-async function finishManualManagerCalc(chatId,paymentType){if(!isAdmin(chatId))return;const s=await getSession(chatId),d=s?.data||{};try{const r=PRICING.calculateManualTour({...d,paymentType});await saveSession(chatId,"MAIN",{});await sendMessage(chatId,PRICING.formatManualCalculation(r),managerCalculationKeyboard());}catch(e){await sendMessage(chatId,"❌ خطا در محاسبه:\n"+e.message,managerCalculationKeyboard());}}
-
-/* =========================================================
    MAIN KEYBOARD
 ========================================================= */
 
 function mainKeyboard() {
-  const keyboard=[
-    [{text:"🏨 رزرو هتل"},{text:"🚌 تورهای مشهد"}],
-    [{text:"💎 طرح الماس شهر بهشت"},{text:"🧳 خدمات گردشگری"}],
-    [{text:"📞 تماس با ما"},{text:"📢 کانال"}]
-  ];
-  if(isAdmin(arguments[0])) keyboard.push([{text:"🧮 محاسبات مدیر"}]);
-  return {keyboard,resize_keyboard:true};
+
+  return {
+
+    keyboard: [
+
+      [
+        {
+          text:
+            "🏨 رزرو هتل"
+        },
+
+        {
+          text:
+            "🚌 تورهای مشهد"
+        }
+      ],
+
+      [
+        {
+          text:
+            "💎 طرح الماس شهر بهشت"
+        },
+
+        {
+          text:
+            "🧳 خدمات گردشگری"
+        }
+      ],
+
+      [
+        {
+          text:
+            "📞 تماس با ما"
+        },
+
+        {
+          text:
+            "📢 کانال"
+        }
+      ]
+    ],
+
+    resize_keyboard:
+      true
+  };
 }
 /* =========================================================
    فرم تور - تعداد شب اقامت
@@ -1398,7 +1408,7 @@ async function forwardPassengerDocument(
       "sendDocument",
       {
         chat_id:
-          CONFIG.ADMIN_CHAT_ID,
+          ADMIN_CHAT_ID,
 
         document:
           fileId,
@@ -1641,7 +1651,7 @@ async function submitTourRequest(
 
   await sendMessage(
 
-    CONFIG.ADMIN_CHAT_ID,
+    ADMIN_CHAT_ID,
 
     adminText,
 
@@ -2212,8 +2222,6 @@ async function handleMessage(
   }
 
 
-  if(text==="🧮 محاسبات مدیر"){if(isAdmin(chatId))await showManagerCalculations(chatId);return;}
-
   /* طرح الماس */
 
   if (
@@ -2301,8 +2309,6 @@ async function handleMessage(
   }
 
 
-  if(session&&isAdmin(chatId)){if(await handleRailCalculationText(chatId,text,session))return;if(await handleManagerCalculationText(chatId,text,session))return;}
-
   /* فرم تور */
 
   if (session) {
@@ -2375,21 +2381,6 @@ async function handleCallback(
     return;
   }
 
-
-  if(data==="ADMIN_CALC_MENU"){if(!isAdmin(chatId))return;await showManagerCalculations(chatId);return;}
-  if(data.startsWith("RAILCALC_ROUTE:")){if(!isAdmin(chatId))return;const route=data.split(":")[1];await saveSession(chatId,"RAILCALC_ADULTS",{route});await sendMessage(chatId,"👨 تعداد بزرگسال را وارد کنید:");return;}
-  if(data==="RAILCALC_PRIVATE_YES"||data==="RAILCALC_PRIVATE_NO"){if(!isAdmin(chatId))return;const ss=await getSession(chatId);const d={...(ss?.data||{}),privateCompartment:data==="RAILCALC_PRIVATE_YES"};await saveSession(chatId,"RAILCALC_PAYMENT",d);await sendMessage(chatId,"💳 نوع پرداخت را انتخاب کنید:",{inline_keyboard:[[{text:"💵 نقدی",callback_data:"RAILCALC_CASH"}],[{text:"💎 طرح الماس",callback_data:"RAILCALC_LOAN"}]]});return;}
-  if(data==="RAILCALC_CASH"||data==="RAILCALC_LOAN"){if(!isAdmin(chatId))return;const ss=await getSession(chatId);try{const r=PRICING.calculateRailTour({...ss.data,paymentType:data==="RAILCALC_LOAN"?"loan":"cash"});await saveSession(chatId,"MAIN",{});await sendMessage(chatId,PRICING.formatRailCalculation(r),managerCalculationKeyboard());}catch(e){await sendMessage(chatId,"❌ خطا در محاسبه:\n"+e.message,managerCalculationKeyboard());}return;}
-  if(data==="ADMIN_RAIL_CALC"){if(!isAdmin(chatId))return;await startRailCalculation(chatId);return;}
-  if(data==="ADMIN_AIR_CALC"){if(!isAdmin(chatId))return;await startManualManagerCalc(chatId,"AIR");return;}
-  if(data==="ADMIN_BUS_CALC"){if(!isAdmin(chatId))return;await startManualManagerCalc(chatId,"BUS");return;}
-  if(data==="ADMIN_CARAVAN_BUS_CALC"){if(!isAdmin(chatId))return;await startManualManagerCalc(chatId,"CARAVAN_BUS");return;}
-  if(data==="ADMIN_CARAVAN_RAIL_CALC"){if(!isAdmin(chatId))return;await startManualManagerCalc(chatId,"CARAVAN_RAIL");return;}
-  if(data==="ADMIN_HOTEL_CALC"){if(!isAdmin(chatId))return;await startManualManagerCalc(chatId,"HOTEL");return;}
-  if(data==="ADMIN_DIAMOND_CALC"){if(!isAdmin(chatId))return;await startManualManagerCalc(chatId,"DIAMOND");return;}
-  if(data==="ADMIN_MANUAL_CASH"){if(!isAdmin(chatId))return;await finishManualManagerCalc(chatId,"cash");return;}
-  if(data==="ADMIN_MANUAL_LOAN"){if(!isAdmin(chatId))return;await finishManualManagerCalc(chatId,"loan");return;}
-  if(data==="ADMIN_CALC_EXIT"){if(!isAdmin(chatId))return;await saveSession(chatId,"MAIN",{});await sendMessage(chatId,"✅ از محاسبات مدیر خارج شدی.",mainKeyboard());return;}
 
   /* تأیید مدیر */
 
@@ -2610,16 +2601,16 @@ async function startServer() {
 
     app.listen(
 
-      CONFIG.PORT,
+      PORT,
 
       () => {
 
         console.log(
-          `🚀 Server running on port ${CONFIG.PORT}`
+          `🚀 Server running on port ${PORT}`
         );
 
         console.log(
-          `👤 ADMIN_CHAT_ID: ${CONFIG.ADMIN_CHAT_ID}`
+          `👤 ADMIN_CHAT_ID: ${ADMIN_CHAT_ID}`
         );
 
       }

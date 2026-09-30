@@ -1,1811 +1,124 @@
 require("dotenv").config();
-
 const express = require("express");
 const { Pool } = require("pg");
-
 const CONFIG = require("./config");
 const PRICING = require("./pricing");
 
 const app = express();
+app.use(express.json({ limit: "20mb" }));
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
-app.use(express.json());
+const TOUR_NAMES = { AIR:"✈️ تور هوایی", RAIL:"🚆 تور ریلی", BUS:"🚌 تور اتوبوسی", CARAVAN_BUS:"🚍 کاروان اتوبوسی", CARAVAN_RAIL:"🚆 کاروان ریلی" };
+const NEED_PASSENGER_LIST = ["AIR","RAIL","CARAVAN_BUS","CARAVAN_RAIL"];
 
-const PORT = process.env.PORT || 3000;
-
-
-/* =========================================================
-   DATABASE
-========================================================= */
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
-
-
-/* =========================================================
-   DATABASE INITIALIZATION
-========================================================= */
-
-async function initDB() {
-
-  console.log("🔄 Initializing database...");
-
-  /*
-   * جدول sessions
-   */
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      user_id TEXT PRIMARY KEY,
-      state TEXT,
-      data JSONB DEFAULT '{}'::jsonb,
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
-
-
-  /*
-   * جدول requests
-   *
-   * این ساختار کامل‌تر از نسخه قبلی است
-   * و اطلاعات درخواست تور، پرداخت و مسافر را نگه می‌دارد.
-   */
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS requests (
-      id SERIAL PRIMARY KEY,
-
-      request_code TEXT UNIQUE,
-
-      user_id TEXT,
-      chat_id TEXT,
-
-      username TEXT,
-      applicant_name TEXT,
-      phone TEXT,
-      bale_id TEXT,
-
-      request_type TEXT,
-
-      payment_type TEXT,
-
-      payload JSONB DEFAULT '{}'::jsonb,
-
-      status TEXT DEFAULT 'pending',
-
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
-
-
-  /*
-   * اگر جدول requests از نسخه قبلی وجود داشته باشد
-   * ستون‌های جدید را اضافه می‌کنیم.
-   */
-
-  await pool.query(`
-    ALTER TABLE requests
-    ADD COLUMN IF NOT EXISTS applicant_name TEXT;
-  `);
-
-  await pool.query(`
-    ALTER TABLE requests
-    ADD COLUMN IF NOT EXISTS phone TEXT;
-  `);
-
-  await pool.query(`
-    ALTER TABLE requests
-    ADD COLUMN IF NOT EXISTS bale_id TEXT;
-  `);
-
-  await pool.query(`
-    ALTER TABLE requests
-    ADD COLUMN IF NOT EXISTS payment_type TEXT;
-  `);
-
-  await pool.query(`
-    ALTER TABLE requests
-    ADD COLUMN IF NOT EXISTS payload JSONB DEFAULT '{}'::jsonb;
-  `);
-
-  await pool.query(`
-    ALTER TABLE requests
-    ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
-  `);
-
-  await pool.query(`
-    ALTER TABLE requests
-    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
-  `);
-
-
-  console.log("✅ Database initialized successfully");
+function isAdmin(chatId){ return String(chatId) === String(CONFIG.ADMIN_CHAT_ID); }
+function en(v){ return String(v ?? "").replace(/[۰-۹]/g,d=>String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))).replace(/[٠-٩]/g,d=>String("٠١٢٣٤٥٦٧٨٩".indexOf(d))); }
+function fa(v){ return String(v ?? "").replace(/0/g,"۰").replace(/1/g,"۱").replace(/2/g,"۲").replace(/3/g,"۳").replace(/4/g,"۴").replace(/5/g,"۵").replace(/6/g,"۶").replace(/7/g,"۷").replace(/8/g,"۸").replace(/9/g,"۹"); }
+function money(v){ return Number(v||0).toLocaleString("fa-IR"); }
+function getChatId(m){ return String(m?.chat?.id ?? m?.sender?.id ?? m?.from?.id ?? ""); }
+function getUsername(m){ return m?.sender?.username || m?.from?.username || ""; }
+function getFirstName(m){ return m?.sender?.first_name || m?.sender?.firstName || m?.from?.first_name || m?.from?.firstName || "کاربر"; }
+function validPhone(v){ return /^09\d{9}$/.test(en(v).replace(/\s/g,"")); }
+function validNational(v){ return /^\d{10}$/.test(en(v).replace(/\D/g,"")); }
+function normalizeDate(v){
+  const p=en(v).trim().replace(/[.-]/g,"/").split("/");
+  if(p.length!==3) return null;
+  const y=Number(p[0]), m=Number(p[1]), d=Number(p[2]);
+  if(!Number.isInteger(y)||!Number.isInteger(m)||!Number.isInteger(d)||y<1300||y>1500||m<1||m>12||d<1||d>(m<=6?31:m<=11?30:30)) return null;
+  return `${y}/${String(m).padStart(2,"0")}/${String(d).padStart(2,"0")}`;
+}
+function jalaliToDay(v){
+  const [jy,jm,jd]=v.split("/").map(Number);
+  let days=-355668+365*(jy-1)+Math.floor((jy-1)/33)*8+Math.floor(((jy-1)%33+3)/4)+jd-1;
+  const md=[31,31,31,31,31,31,30,30,30,30,30,29];
+  for(let i=0;i<jm-1;i++) days+=md[i];
+  return days;
+}
+function todayJalali(){
+  const d=new Date();
+  const gy=d.getUTCFullYear(), gm=d.getUTCMonth()+1, gd=d.getUTCDate();
+  let gDay=Date.UTC(gy,gm-1,gd)/86400000;
+  let jy=gy-621;
+  while(jalaliToDay(`${jy+1}/01/01`)-jalaliToDay("1/01/01")<=gDay-Date.UTC(1,0,1)/86400000) jy++;
+  return null;
 }
 
-
-/* =========================================================
-   SESSION
-========================================================= */
-
-async function getSession(userId) {
-
-  const result = await pool.query(
-    `
-      SELECT *
-      FROM sessions
-      WHERE user_id = $1
-    `,
-    [String(userId)]
-  );
-
-  if (result.rows.length === 0) {
-    return null;
+async function initDB(){
+  await pool.query(`CREATE TABLE IF NOT EXISTS sessions(user_id TEXT PRIMARY KEY,state TEXT,data JSONB DEFAULT '{}'::jsonb,updated_at TIMESTAMPTZ DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS requests(id SERIAL PRIMARY KEY,request_code TEXT UNIQUE,user_id TEXT,chat_id TEXT,username TEXT,applicant_name TEXT,phone TEXT,bale_id TEXT,request_type TEXT,payment_type TEXT,payload JSONB DEFAULT '{}'::jsonb,status TEXT DEFAULT 'pending',created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`);
+  const cols=["applicant_name","phone","bale_id","payment_type","payload","status","updated_at","username","request_type"];
+     for(const c of cols){
+    const type=c==="payload"?"JSONB DEFAULT '{}'::jsonb":c==="status"?"TEXT DEFAULT 'pending'":"TEXT";
+    await pool.query(`ALTER TABLE requests ADD COLUMN IF NOT EXISTS ${c} ${type}`);
   }
-
-  return result.rows[0];
 }
 
+async function getSession(id){
+  const r=await pool.query("SELECT * FROM sessions WHERE user_id=$1",[String(id)]);
+  return r.rows[0]||null;
+}
 
-async function saveSession(
-  userId,
-  state,
-  data = {}
-) {
-
+async function saveSession(id,state,data={}){
   await pool.query(
-    `
-      INSERT INTO sessions
-      (
-        user_id,
-        state,
-        data,
-        updated_at
-      )
-
-      VALUES
-      (
-        $1,
-        $2,
-        $3,
-        NOW()
-      )
-
-      ON CONFLICT (user_id)
-
-      DO UPDATE SET
-        state = EXCLUDED.state,
-        data = EXCLUDED.data,
-        updated_at = NOW()
-    `,
-    [
-      String(userId),
-      state,
-      JSON.stringify(data)
-    ]
+    `INSERT INTO sessions(user_id,state,data,updated_at)
+     VALUES($1,$2,$3,NOW())
+     ON CONFLICT(user_id)
+     DO UPDATE SET state=EXCLUDED.state,data=EXCLUDED.data,updated_at=NOW()`,
+    [String(id),state,JSON.stringify(data)]
   );
 }
 
-
-async function clearSession(userId) {
-
-  await pool.query(
-    `
-      DELETE FROM sessions
-      WHERE user_id = $1
-    `,
-    [String(userId)]
-  );
+async function clearSession(id){
+  await pool.query("DELETE FROM sessions WHERE user_id=$1",[String(id)]);
 }
 
-
-/* =========================================================
-   HELPERS
-========================================================= */
-
-function getUserId(message) {
-
-  return String(
-    message?.sender?.id ||
-    message?.from?.id ||
-    message?.chat?.id ||
-    ""
-  );
-}
-
-
-function getChatId(message) {
-
-  return String(
-    message?.chat?.id ||
-    message?.sender?.id ||
-    message?.from?.id ||
-    ""
-  );
-}
-
-
-function getUsername(message) {
-
-  return (
-    message?.sender?.username ||
-    message?.from?.username ||
-    ""
-  );
-}
-
-
-function getFirstName(message) {
-
-  return (
-    message?.sender?.first_name ||
-    message?.sender?.firstName ||
-    message?.from?.first_name ||
-    message?.from?.firstName ||
-    "کاربر"
-  );
-}
-
-
-function getLastName(message) {
-
-  return (
-    message?.sender?.last_name ||
-    message?.sender?.lastName ||
-    message?.from?.last_name ||
-    message?.from?.lastName ||
-    ""
-  );
-}
-
-
-/* =========================================================
-   تبدیل اعداد فارسی به انگلیسی
-========================================================= */
-
-function toEnglishDigits(value) {
-
-  if (!value) return "";
-
-  return String(value)
-    .replace(/[۰-۹]/g, d =>
-      String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))
-    )
-    .replace(/[٠-٩]/g, d =>
-      String("٠١٢٣٤٥٦٧٨٩".indexOf(d))
-    );
-}
-
-
-/* =========================================================
-   تبدیل اعداد انگلیسی به فارسی
-========================================================= */
-
-function toPersianDigits(value) {
-
-  if (value === undefined || value === null) {
-    return "";
-  }
-
-  return String(value)
-    .replace(/0/g, "۰")
-    .replace(/1/g, "۱")
-    .replace(/2/g, "۲")
-    .replace(/3/g, "۳")
-    .replace(/4/g, "۴")
-    .replace(/5/g, "۵")
-    .replace(/6/g, "۶")
-    .replace(/7/g, "۷")
-    .replace(/8/g, "۸")
-    .replace(/9/g, "۹");
-}
-
-
-/* =========================================================
-   اعتبارسنجی تعداد شب
-========================================================= */
-
-function parsePositiveNumber(text) {
-
-  const value = Number(
-    toEnglishDigits(text)
-      .replace(/[^\d]/g, "")
-  );
-
-  if (
-    !Number.isInteger(value) ||
-    value <= 0
-  ) {
-    return null;
-  }
-
-  return value;
-}
-
-
-/* =========================================================
-   تاریخ تولد همراهان
-   فرمت صحیح:
-   YYYY/MM/DD
-   مثال:
-   1362/06/17
-========================================================= */
-
-function normalizeBirthDate(text) {
-
-  const value =
-    toEnglishDigits(text)
-      .trim()
-      .replace(/[-.]/g, "/");
-
-  const parts =
-    value.split("/");
-
-  if (parts.length !== 3) {
-    return null;
-  }
-
-  const year =
-    parts[0].trim();
-
-  const month =
-    parts[1].trim().padStart(2, "0");
-
-  const day =
-    parts[2].trim().padStart(2, "0");
-
-  if (
-    !/^\d{4}$/.test(year) ||
-    !/^\d{2}$/.test(month) ||
-    !/^\d{2}$/.test(day)
-  ) {
-    return null;
-  }
-
-  const monthNumber =
-    Number(month);
-
-  const dayNumber =
-    Number(day);
-
-  if (
-    monthNumber < 1 ||
-    monthNumber > 12 ||
-    dayNumber < 1 ||
-    dayNumber > 31
-  ) {
-    return null;
-  }
-
-  return `${year}/${month}/${day}`;
-}
-
-
-/* =========================================================
-   BALE API
-========================================================= */
-
-async function baleRequest(
-  method,
-  body
-) {
-
-  const token =
-    CONFIG.BOT_TOKEN;
-
-  if (!token) {
-
-    throw new Error(
-      "BALE_BOT_TOKEN در Environment Variables تنظیم نشده است."
-    );
-  }
-
-  const url =
-    `${CONFIG.BALE_API_BASE}${token}/${method}`;
-
-  const response =
-    await fetch(
-      url,
-      {
-        method: "POST",
-
-        headers: {
-          "Content-Type":
-            "application/json"
-        },
-
-        body:
-          JSON.stringify(body)
-      }
-    );
-
-  const data =
-    await response
-      .json()
-      .catch(() => ({}));
-
-  console.log(
-    "📡 BALE:",
-    method,
-    data
-  );
-
-  if (
-    !response.ok ||
-    data.ok === false
-  ) {
-
-    throw new Error(
-      data.description ||
-      `Bale API ${response.status}`
-    );
-  }
-
-  return data;
-}
-
-
-/* =========================================================
-   SEND MESSAGE
-========================================================= */
-
-async function sendMessage(
-  chatId,
-  text,
-  replyMarkup
-) {
-
-  const body = {
-    chat_id: chatId,
-    text
-  };
-
-  if (replyMarkup) {
-
-    body.reply_markup =
-      replyMarkup;
-  }
-
-  return baleRequest(
-    "sendMessage",
-    body
-  );
-}
-
-
-/* =========================================================
-   CALLBACK
-========================================================= */
-
-async function answerCallback(
-  callbackId
-) {
-
-  try {
-
-    await baleRequest(
-      "answerCallbackQuery",
-      {
-        callback_query_id:
-          callbackId
-      }
-    );
-
-  } catch (error) {
-
-    console.error(
-      "Callback error:",
-      error.message
-    );
-  }
-}
-
-
-/* =========================================================
-   دسترسی و محاسبات مدیر
-========================================================= */
-function isAdmin(chatId){ return String(chatId)===String(CONFIG.ADMIN_CHAT_ID); }
-function managerCalculationKeyboard(){return {inline_keyboard:[[{text:"🚆 محاسبه تور ریلی",callback_data:"ADMIN_RAIL_CALC"}],[{text:"✈️ محاسبه تور هوایی",callback_data:"ADMIN_AIR_CALC"}],[{text:"🚌 محاسبه تور اتوبوسی
-   🚍 محاسبه کاروان اتوبوسی",callback_data:"ADMIN_CARAVAN_BUS_CALC"}],[{text:"🚆 محاسبه کاروان ریلی",callback_data:"ADMIN_CARAVAN_RAIL_CALC"}],[{text:"🏨 محاسبه فقط هتل",callback_data:"ADMIN_HOTEL_CALC"}],[{text:"💎 محاسبه طرح الماس",callback_data:"ADMIN_DIAMOND_CALC"}],[{text:"🔙 خروج",callback_data:"ADMIN_CALC_EXIT"}]]};}
-async function showManagerCalculations(chatId){if(!isAdmin(chatId))return;await saveSession(chatId,"ADMIN_CALC_MENU",{});await sendMessage(chatId,"🧮 محاسبات مدیر\n\nنوع محاسبه را انتخاب کنید:",managerCalculationKeyboard());}
-async function startManualManagerCalc(chatId,type){if(!isAdmin(chatId))return;await saveSession(chatId,"ADMIN_CALC_ADULTS",{type});await sendMessage(chatId,`نوع محاسبه: ${type}\n\n👨 تعداد بزرگسال را وارد کنید:`);}
-async function handleManagerCalculationText(chatId,text,session){if(!isAdmin(chatId)||!session||!session.state.startsWith("ADMIN_CALC_"))return false;const d=session.data||{},v=Number(toEnglishDigits(text).replace(/[^\d]/g,""));if(session.state==="ADMIN_CALC_ADULTS"){if(!Number.isInteger(v)||v<=0){await sendMessage(chatId,"❌ تعداد بزرگسال نامعتبر است.");return true;}await saveSession(chatId,"ADMIN_CALC_CHILDREN",{...d,adults:v});await sendMessage(chatId,"👧 تعداد کودک ۳ تا ۵ سال را وارد کنید:");return true;}if(session.state==="ADMIN_CALC_CHILDREN"){if(!Number.isInteger(v)||v<0){await sendMessage(chatId,"❌ تعداد کودک نامعتبر است.");return true;}await saveSession(chatId,"ADMIN_CALC_NIGHTS",{...d,children:v});await sendMessage(chatId,"🌙 تعداد شب اقامت را وارد کنید:");return true;}if(session.state==="ADMIN_CALC_NIGHTS"){if(!Number.isInteger(v)||v<=0){await sendMessage(chatId,"❌ تعداد شب نامعتبر است.");return true;}await saveSession(chatId,"ADMIN_CALC_TICKET",{...d,nights:v});await sendMessage(chatId,"🎫 قیمت بلیت/هزینه رفت‌وبرگشت هر بزرگسال را وارد کنید:");return true;}if(session.state==="ADMIN_CALC_TICKET"){if(v<0){await sendMessage(chatId,"❌ مبلغ نامعتبر است.");return true;}await saveSession(chatId,"ADMIN_CALC_HOTEL",{...d,ticketAdult:v});await sendMessage(chatId,"🏨 قیمت هتل هر بزرگسال برای هر شب را وارد کنید (پیش‌فرض ۲۳۰۰۰۰۰):");return true;}if(session.state==="ADMIN_CALC_HOTEL"){if(v<0){await sendMessage(chatId,"❌ مبلغ نامعتبر است.");return true;}await saveSession(chatId,"ADMIN_CALC_PAYMENT",{...d,hotelAdult:v||2300000});await sendMessage(chatId,"💳 نوع پرداخت را انتخاب کنید:",{inline_keyboard:[[{text:"💵 نقدی",callback_data:"ADMIN_MANUAL_CASH"}],[{text:"💎 طرح الماس",callback_data:"ADMIN_MANUAL_LOAN"}]]});return true;}return false;}
-async function startRailCalculation(chatId){
-  if(!isAdmin(chatId)) return;
-
-  await saveSession(chatId,"RAILCALC_ROUTE",{});
-
-  const routes=CONFIG.RAIL?.TICKET_PRICES||{};
-  const rows=[];
-
-  for(const [key,val] of Object.entries(routes)){
-    rows.push([{
-      text:`🚆 ${val.name||key}`,
-      callback_data:`RAILCALC_ROUTE:${key}`
-    }]);
-  }
-
-  rows.push([{
-    text:"🔙 خروج",
-    callback_data:"ADMIN_CALC_EXIT"
-  }]);
-
-  await sendMessage(
-    chatId,
-    "🚆 محاسبه تور ریلی\n\nمسیر را انتخاب کنید:",
-    {inline_keyboard:rows}
-  );
-}
-
-async function showRailTrainSelection(chatId,route){
-  const routeConfig=CONFIG.RAIL?.TICKET_PRICES?.[route];
-
-  if(!routeConfig){
-    await sendMessage(chatId,"❌ مسیر ریلی پیدا نشد.",managerCalculationKeyboard());
-    return;
-  }
-
-  const trains=routeConfig.TRAINS||[];
-  const rows=[];
-
-  for(const train of trains){
-    rows.push([{
-      text:`🚆 ${train.name} | ${train.berthType} | ${PRICING.formatMoney(train.price)} تومان`,
-      callback_data:`RAILCALC_TRAIN:${route}:${train.id}`
-    }]);
-  }
-
-  rows.push([{
-    text:"🔙 تغییر مسیر",
-    callback_data:"ADMIN_RAIL_CALC"
-  }]);
-
-  await saveSession(chatId,"RAILCALC_TRAIN",{route});
-
-  await sendMessage(
-    chatId,
-    `🚆 ${routeConfig.name}\n\nقطار موردنظر را انتخاب کنید:`,
-    {inline_keyboard:rows}
-  );
-}
-
-async function handleRailCalculationText(chatId,text,session){
-  if(!isAdmin(chatId)||!session||!session.state.startsWith("RAILCALC_")) return false;
-
-  const d=session.data||{};
-  const v=Number(toEnglishDigits(text).replace(/[^\d]/g,""));
-
-  if(session.state==="RAILCALC_ADULTS"){
-    if(!Number.isInteger(v)||v<=0){
-      await sendMessage(chatId,"❌ تعداد بزرگسال نامعتبر است.\nمثال: ۲");
-      return true;
-    }
-
-    await saveSession(chatId,"RAILCALC_CHILDREN",{...d,adults:v});
-    await sendMessage(chatId,"👧 تعداد کودک ۳ تا ۱۲ سال را وارد کنید:\n\nاگر کودک ندارید ۰ وارد کنید.");
-    return true;
-  }
-
-  if(session.state==="RAILCALC_CHILDREN"){
-    if(!Number.isInteger(v)||v<0){
-      await sendMessage(chatId,"❌ تعداد کودک نامعتبر است.");
-      return true;
-    }
-
-    await saveSession(chatId,"RAILCALC_NIGHTS",{...d,children:v});
-    await sendMessage(chatId,"🌙 تعداد شب اقامت را وارد کنید:");
-    return true;
-  }
-
-  if(session.state==="RAILCALC_NIGHTS"){
-    if(!Number.isInteger(v)||v<=0){
-      await sendMessage(chatId,"❌ تعداد شب نامعتبر است.");
-      return true;
-    }
-
-    await saveSession(chatId,"RAILCALC_HOTEL",{...d,nights:v});
-    await sendMessage(chatId,"🏨 قیمت هتل هر نفر برای هر شب را وارد کنید:\n\nمثال: ۲۵۰۰۰۰۰ تومان");
-    return true;
-  }
-
-  if(session.state==="RAILCALC_HOTEL"){
-    if(v<=0){
-      await sendMessage(chatId,"❌ مبلغ هتل نامعتبر است.\nلطفاً مبلغ واقعی هتل را وارد کنید.");
-      return true;
-    }
-
-    await saveSession(chatId,"RAILCALC_PAYMENT",{
-      ...d,
-      hotelPricePerPersonPerNight:v
-    });
-
-    await sendMessage(
-      chatId,
-      "💳 نوع پرداخت را انتخاب کنید:",
-      {
-        inline_keyboard:[
-          [{text:"💵 نقدی",callback_data:"RAILCALC_CASH"}],
-          [{text:"💎 طرح الماس",callback_data:"RAILCALC_LOAN"}],
-          [{text:"🔙 بازگشت به انتخاب قطار",callback_data:`RAILCALC_ROUTE_BACK:${d.route}`}]
-        ]
-      }
-    );
-    return true;
-  }
-
-  return false;
-}
-
-async function finishManualManagerCalc(chatId,paymentType){if(!isAdmin(chatId))return;const s=await getSession(chatId),d=s?.data||{};try{const r=PRICING.calculateManualTour({...d,paymentType});await saveSession(chatId,"MAIN",{});await sendMessage(chatId,PRICING.formatManualCalculation(r),managerCalculationKeyboard());}catch(e){await sendMessage(chatId,"❌ خطا در محاسبه:\n"+e.message,managerCalculationKeyboard());}}
-
-/* =========================================================
-   MAIN KEYBOARD
-========================================================= */
-
-function mainKeyboard(chatId) {
-  const keyboard=[
-    [{text:"🏨 رزرو هتل"},{text:"🚌 تورهای مشهد"}],
-    [{text:"💎 طرح الماس شهر بهشت"},{text:"🧳 خدمات گردشگری"}],
-    [{text:"📞 تماس با ما"},{text:"📢 کانال"}]
-  ];
-  if(isAdmin(chatId)) keyboard.push([{text:"🧮 محاسبات مدیر"}]);
-  return {keyboard,resize_keyboard:true};
-}
-/* =========================================================
-   فرم تور - تعداد شب اقامت
-========================================================= */
-
-async function askTourNights(chatId, data) {
-
-  await saveSession(
-    chatId,
-    "TOUR_NIGHTS",
-    data
-  );
-
-  await sendMessage(
-    chatId,
-
-    "🌙 تعداد شب اقامت را وارد کنید.\n\n" +
-    "مثلاً:\n" +
-    "۳"
-  );
-}
-
-
-/* =========================================================
-   تعداد بزرگسال
-========================================================= */
-
-async function askTourAdults(chatId, data) {
-
-  await saveSession(
-    chatId,
-    "TOUR_ADULTS",
-    data
-  );
-
-  await sendMessage(
-    chatId,
-
-    "👨 تعداد بزرگسال را وارد کنید.\n\n" +
-    "مثلاً:\n" +
-    "۲"
-  );
-}
-
-
-/* =========================================================
-   تعداد کودک ۳ تا ۵ سال
-========================================================= */
-
-async function askTourChildren(chatId, data) {
-
-  await saveSession(
-    chatId,
-    "TOUR_CHILDREN",
-    data
-  );
-
-  await sendMessage(
-    chatId,
-
-    "👧 تعداد کودک ۳ تا ۵ سال را وارد کنید.\n\n" +
-    "اگر کودک ندارید عدد ۰ را بفرستید."
-  );
-}
-
-
-/* =========================================================
-   نوع پرداخت
-========================================================= */
-
-async function askTourPayment(chatId, data) {
-
-  await saveSession(
-    chatId,
-    "TOUR_PAYMENT",
-    data
-  );
-
-  await sendMessage(
-     inline_keyboard: [
-
-        [
-          {
-            text: "💵 پرداخت نقدی",
-            callback_data: "TOUR_PAYMENT_CASH"
-          }
-        ],
-
-        [
-          {
-            text: "💎 طرح الماس شهر بهشت",
-            callback_data: "TOUR_PAYMENT_LOAN"
-          }
-        ],
-
-        [
-          {
-            text: "🔙 بازگشت",
-            callback_data: "TOUR_BACK"
-          }
-        ]
-
-      ]
-    }
-  );
-}
-
-
-/* =========================================================
-   نام و نام خانوادگی
-========================================================= */
-
-async function askTourName(chatId, data) {
-
-  await saveSession(
-    chatId,
-    "TOUR_NAME",
-    data
-  );
-
-  await sendMessage(
-    chatId,
-
-    "👤 لطفاً نام و نام خانوادگی خود را وارد کنید."
-  );
-}
-
-
-/* =========================================================
-   شماره تماس
-========================================================= */
-
-async function askTourPhone(chatId, data) {
-
-  await saveSession(
-    chatId,
-    "TOUR_PHONE",
-    data
-  );
-
-  await sendMessage(
-    chatId,
-
-    "📱 لطفاً شماره تماس خود را وارد کنید.\n\n" +
-    "مثال:\n" +
-    "۰۹۱۷۷۷۰۰۹۶۱"
-  );
-}
-
-
-/* =========================================================
-   کد ملی برای طرح الماس
-========================================================= */
-
-async function askTourNationalCode(chatId, data) {
-
-  await saveSession(
-    chatId,
-    "TOUR_NATIONAL_CODE",
-    data
-  );
-
-  await sendMessage(
-    chatId,
-
-    "🪪 لطفاً کد ملی متقاضی اصلی را وارد کنید."
-  );
-}
-
-
-/* =========================================================
-   تأیید نهایی اطلاعات
-========================================================= */
-
-async function showTourConfirmation(chatId, data) {
-
-  const typeNames = {
-
-    AIR:
-      "✈️ تور هوایی",
-
-    RAIL:
-      "🚆 تور ریلی",
-
-    BUS:
-      "🚌 تور اتوبوسی",
-
-    CARAVAN_BUS:
-      "🚍 کاروان اتوبوسی",
-
-    CARAVAN_RAIL:
-      "🚆 کاروان ریلی"
-  };
-
-  const paymentText =
-    data.paymentType === "loan"
-      ? "💎 طرح الماس"
-      : "💵 نقدی";
-
-
-  const text =
-
-    "📋 لطفاً اطلاعات درخواست خود را بررسی کنید.\n\n" +
-
-    `🚍 نوع سفر: ${typeNames[data.tourType] || data.tourType}\n` +
-
-    `📅 تاریخ ورود به مشهد: ${data.departureDate}\n` +
-
-    `📅 تاریخ خروج از مشهد: ${data.returnDate}\n` +
-
-    `🌙 تعداد شب اقامت: ${data.nights} شب\n` +
-
-    `👨 بزرگسال: ${data.adults} نفر\n` +
-
-    `👧 کودک ۳ تا ۵ سال: ${data.children} نفر\n` +
-
-    `💳 نوع پرداخت: ${paymentText}\n` +
-
-    `👤 نام و نام خانوادگی: ${data.applicantName}\n` +
-
-    `📱 شماره تماس: ${data.phone}\n` +
-
-    (
-      data.paymentType === "loan"
-        ? `🪪 کد ملی: ${data.nationalCode}\n`
-        : ""
-    ) +
-
-    "\nآیا اطلاعات صحیح است؟";
-
-
-  await sendMessage(
-    chatId,
-    text,
+async function bale(method,body){
+  if(!CONFIG.BOT_TOKEN) throw new Error("BALE_BOT_TOKEN / BOT_TOKEN تنظیم نشده است.");
+  const r=await fetch(
+    `${CONFIG.BALE_API_BASE}${CONFIG.BOT_TOKEN}/${method}`,
     {
-      inline_keyboard: [
-
-        [
-          {
-            text: "✅ ارسال درخواست برای مدیر",
-            callback_data: "TOUR_SUBMIT"
-          }
-        ],
-
-        [
-          {
-            text: "✏️ اصلاح اطلاعات",
-            callback_data: "TOUR_EDIT"
-          }
-        ],
-
-        [
-          {
-            text: "❌ لغو درخواست",
-            callback_data: "TOUR_CANCEL"
-          }
-        ]
-
-      ]
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(body)
     }
   );
-}
-/* =========================================================
-   پردازش فرم تور
-========================================================= */
-
-async function handleTourText(
-  chatId,
-  text,
-  session
-) {
-
-  const data = session.data || {};
-
-
-  /* تاریخ ورود */
-
-  if (session.state === "TOUR_DATE") {
-
-    await askTourReturnDate(
-      chatId,
-      {
-        ...data,
-        departureDate: text
-      }
-    );
-
-    return true;
-  }
-
-
-  /* تاریخ خروج */
-
-  if (session.state === "TOUR_RETURN_DATE") {
-
-    await askTourNights(
-      chatId,
-      {
-        ...data,
-        returnDate: text
-      }
-    );
-
-    return true;
-  }
-
-
-  /* تعداد شب */
-
-  if (session.state === "TOUR_NIGHTS") {
-
-    const nights =
-      Number(
-        toEnglishDigits(text)
-          .replace(/[^\d]/g, "")
-      );
-
-    if (
-      !Number.isInteger(nights) ||
-      nights <= 0
-    ) {
-
-      await sendMessage(
-        chatId,
-        "❌ تعداد شب اقامت نامعتبر است.\nلطفاً یک عدد صحیح وارد کنید."
-      );
-
-      return true;
-    }
-
-
-    await askTourAdults(
-      chatId,
-      {
-        ...data,
-        nights
-      }
-    );
-
-    return true;
-  }
-
-
-  /* تعداد بزرگسال */
-
-  if (session.state === "TOUR_ADULTS") {
-
-    const adults =
-      Number(
-        toEnglishDigits(text)
-          .replace(/[^\d]/g, "")
-      );
-
-    if (
-      !Number.isInteger(adults) ||
-      adults <= 0
-    ) {
-
-      await sendMessage(
-        chatId,
-        "❌ تعداد بزرگسال باید حداقل ۱ نفر باشد."
-      );
-
-      return true;
-    }
-
-
-    await askTourChildren(
-      chatId,
-      {
-        ...data,
-        adults
-      }
-    );
-
-    return true;
-  }
-
-
-  /* تعداد کودک */
-
-  if (session.state === "TOUR_CHILDREN") {
-
-    const children =
-      Number(
-        toEnglishDigits(text)
-          .replace(/[^\d]/g, "")
-      );
-
-    if (
-      !Number.isInteger(children) ||
-      children < 0
-    ) {
-
-      await sendMessage(
-        chatId,
-        "❌ تعداد کودک نامعتبر است."
-      );
-
-      return true;
-    }
-
-
-    await askTourPayment(
-      chatId,
-      {
-        ...data,
-        children
-      }
-    );
-
-    return true;
-  }
-
-
-  /* نام */
-
-  if (session.state === "TOUR_NAME") {
-
-    if (text.length < 3) {
-
-      await sendMessage(
-        chatId,
-        "❌ لطفاً نام و نام خانوادگی کامل را وارد کنید."
-      );
-
-      return true;
-    }
-
-
-    await askTourPhone(
-      chatId,
-      {
-        ...data,
-        applicantName: text
-      }
-    );
-
-    return true;
-  }
-
-
-  /* تلفن */
-
-  if (session.state === "TOUR_PHONE") {
-
-    const phone =
-      toEnglishDigits(text)
-        .replace(/\s/g, "");
-
-    if (
-      !/^09\d{9}$/.test(phone)
-    ) {
-
-      await sendMessage(
-        chatId,
-        "❌ شماره تماس صحیح نیست.\nمثال: ۰۹۱۷۷۷۰۰۹۶۱"
-      );
-
-      return true;
-    }
-
-
-    if (data.paymentType === "loan") {
-
-      await askTourNationalCode(
-        chatId,
-        {
-          ...data,
-          phone
-        }
-      );
-
-      return true;
-    }
-
-
-    await showTourConfirmation(
-      chatId,
-      {
-        ...data,
-        phone
-      }
-    );
-
-    return true;
-  }
-
-
-  /* کد ملی */
-
-  if (
-    session.state ===
-    "TOUR_NATIONAL_CODE"
-  ) {
-
-    const nationalCode =
-      toEnglishDigits(text)
-        .replace(/\D/g, "");
-
-    if (
-      !/^\d{10}$/.test(nationalCode)
-    ) {
-
-      await sendMessage(
-        chatId,
-        "❌ کد ملی باید ۱۰ رقم باشد."
-      );
-
-      return true;
-    }
-
-
-    await showTourConfirmation(
-      chatId,
-      {
-        ...data,
-        nationalCode
-      }
-    );
-
-    return true;
-  }
-
-
-  return false;
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok||j.ok===false) throw new Error(j.description||`Bale ${r.status}`);
+  return j;
 }
 
-
-/* =========================================================
-   تاریخ برگشت
-========================================================= */
-
-async function askTourReturnDate(
-  chatId,
-  data
-) {
-
-  await saveSession(
-    chatId,
-    "TOUR_RETURN_DATE",
-    data
-  );
-
-  await sendMessage(
-    chatId,
-
-    "📅 تاریخ خروج از مشهد را وارد کنید.\n\n" +
-    "مثال:\n" +
-    "۱۴۰۵/۰۷/۱۳"
-  );
-}
-/* =========================================================
-   طرح الماس شهر بهشت
-========================================================= */
-
-function diamondPlanText() {
-
-  return (
-
-    "💎 طرح الماس شهر بهشت\n\n" +
-
-    "با طرح الماس شهر بهشت، بخشی از هزینه سفر شما " +
-    "از طریق تسهیلات تأمین می‌شود و می‌توانید مراحل " +
-    "درخواست را بدون مراجعه حضوری به شعبه انجام دهید.\n\n" +
-
-    "📌 برای استفاده از طرح:\n\n" +
-
-    "۱️⃣ نصب اپلیکیشن کیوبانک\n" +
-    "۲️⃣ تکمیل احراز هویت\n" +
-    "۳️⃣ انجام اعتبارسنجی\n" +
-    "۴️⃣ دریافت رتبه اعتباری\n\n" +
-
-    "🟢 رتبه A و B:\n" +
-    "بدون ضامن؛ خودت ضامن حسابت هستی.\n\n" +
-
-    "🟡 رتبه C و D و پایین‌تر:\n" +
-    "یک ضامن + نامه کسر از حقوق + فیش حقوقی\n\n" +
-
-    "⏳ بازپرداخت: ۱۲ ماهه\n\n" +
-
-    "💰 کارمزد/سود: ۳ درصد سود\n\n" +
-
-    "🚫 بدون مراجعه به شعبه\n\n" +
-
-    "📄 مدارک باید به صورت اصل مدارک بارگذاری شود.\n\n" +
-
-    "📌 پس از دریافت رتبه اعتباری، " +
-    "کد ملی متقاضی اصلی را ارسال کنید تا ادامه مراحل انجام شود.\n\n" +
-
-    "💳 در درخواست سفر با طرح الماس، پس از طی مراحل " +
-    "و تأیید اطلاعات حساب بانکی، مسافر باید " +
-    "۴۰٪ هزینه کل سفر را پرداخت کند.\n\n" +
-
-    "🧾 پس از ارسال فیش واریزی و بررسی آن، " +
-    "مراحل فعال‌سازی وام برای ایشان انجام می‌شود.\n\n" +
-
-    "📞 پشتیبانی و راهنمایی:\n" +
-    "۰۹۱۷۷۷۰۰۹۶۱"
-
-  );
+async function sendMessage(chatId,text,reply_markup){
+  const b={chat_id:String(chatId),text};
+  if(reply_markup)b.reply_markup=reply_markup;
+  return bale("sendMessage",b);
 }
 
-
-async function sendDiamondPlan(
-  chatId
-) {
-
-  await sendMessage(
-
-    chatId,
-
-    diamondPlanText(),
-
-    {
-      inline_keyboard: [
-
-        [
-          {
-            text:
-              "📲 نصب کیوبانک مهر",
-
-            url:
-              "https://qbank24.ir/downloads"
-          }
-        ],
-
-        [
-          {
-            text:
-              "🔙 بازگشت",
-
-            callback_data:
-              "DIAMOND_BACK"
-          }
-        ]
-
-      ]
-    }
-  );
-}
-/* =========================================================
-   اطلاعات حساب بانکی
-========================================================= */
-
-function cashAccountText() {
-
-  return (
-
-    "💵 اطلاعات پرداخت\n\n" +
-
-    "🏦 بانک: مهر ایران\n" +
-
-    "👤 به نام: مهدی رشیدیان طرقی\n\n" +
-
-    "💳 شماره کارت:\n" +
-    "6063731161437174\n\n" +
-
-    "🏦 شماره حساب:\n" +
-    "363470014517217001\n\n" +
-
-    "🔗 شماره شبا:\n" +
-    "IR160600363470014517217001\n\n" +
-
-    "⚠️ پس از پرداخت، تصویر فیش واریزی را ارسال کنید."
-  );
+async function sendPhoto(chatId,photo,caption){
+  return bale("sendPhoto",{chat_id:String(chatId),photo,caption});
 }
 
-
-function diamondPaymentText(
-  request
-) {
-
-  const total =
-    Number(
-      request.payload?.totalCost || 0
-    );
-
-  if (total > 0) {
-
-    const fortyPercent =
-      Math.ceil(
-        total * 0.40
-      );
-
-    return (
-
-      "💎 درخواست طرح الماس تأیید شد.\n\n" +
-
-      `🆔 درخواست: ${request.request_code}\n\n` +
-
-      `💰 هزینه کل سفر: ${toPersianDigits(total)} تومان\n` +
-
-      `💳 سهم مسافر (۴۰٪): ${toPersianDigits(fortyPercent)} تومان\n\n` +
-
-      "لطفاً ۴۰٪ هزینه کل را پرداخت کنید و " +
-      "تصویر فیش واریزی را ارسال نمایید.\n\n" +
-
-      "پس از بررسی فیش، مراحل فعال‌سازی وام انجام می‌شود."
-    );
-
-  }
-
-  return (
-
-    "💎 درخواست طرح الماس شما تأیید شد.\n\n" +
-
-    `🆔 شماره درخواست: ${request.request_code}\n\n` +
-
-    "پس از طی مراحل اعتبارسنجی و ارسال اطلاعات حساب بانکی، " +
-    "باید ۴۰٪ هزینه کل سفر را پرداخت کنید.\n\n" +
-
-    "🧾 پس از پرداخت، تصویر فیش واریزی را ارسال کنید.\n\n" +
-
-    "پس از بررسی فیش، مراحل فعال‌سازی وام انجام می‌شود."
-
-  );
-}
-/* =========================================================
-   وضعیت ارسال لیست مسافران
-========================================================= */
-
-async function askPassengerFile(
-  chatId,
-  requestCode,
-  tourType
-) {
-
-  await saveSession(
-
-    chatId,
-
-    "WAITING_PASSENGER_FILE",
-
-    {
-      requestCode,
-      tourType
-    }
-  );
-
-
-  let text = "";
-
-  if (
-    tourType === "CARAVAN_BUS" ||
-    tourType === "CARAVAN_RAIL"
-  ) {
-
-    text =
-      "📋 درخواست شما تأیید شد.\n\n" +
-
-      "اکنون لطفاً **فایل لیست کامل مسافران** را ارسال کنید.\n\n" +
-
-      "مشخصات موردنیاز هر مسافر:\n" +
-
-      "👤 نام و نام خانوادگی\n" +
-
-      "🪪 کد ملی\n" +
-
-      "🎂 تاریخ تولد\n\n" +
-
-      "فرمت تاریخ تولد حتماً به صورت زیر باشد:\n" +
-
-      "1362/06/17\n\n" +
-
-      `🆔 شماره درخواست: ${requestCode}`;
-
-  } else {
-
-    text =
-      "📋 درخواست شما تأیید شد.\n\n" +
-
-      "لطفاً فایل لیست همراهان را ارسال کنید.\n\n" +
-
-      "مشخصات هر همراه:\n" +
-
-      "👤 نام و نام خانوادگی\n" +
-
-      "🪪 کد ملی\n" +
-
-      "🎂 تاریخ تولد\n\n" +
-
-      "فرمت تاریخ تولد:\n" +
-
-      "1362/06/17\n\n" +
-
-      `🆔 شماره درخواست: ${requestCode}`;
-  }
-
-
-  await sendMessage(
-    chatId,
-    text
-  );
+async function sendDocument(chatId,document,caption){
+  return bale("sendDocument",{chat_id:String(chatId),document,caption});
 }
 
-
-/* =========================================================
-   ارسال فایل مشتری به گروه مدیران
-========================================================= */
-
-async function forwardPassengerDocument(
-  message,
-  session
-) {
-
-  const document =
-    message.document;
-
-  if (!document) {
-    return false;
-  }
-
-
-  const fileId =
-    document.file_id;
-
-
-  if (!fileId) {
-    return false;
-  }
-
-
-  const requestCode =
-    session.data.requestCode;
-
-
-  const caption =
-
-    "📋 فایل لیست مسافران\n\n" +
-
-    `🆔 درخواست: ${requestCode}\n` +
-
-    `👤 کاربر: ${getFirstName(message)}\n` +
-
-    `🔹 ${getUsername(message) || "بدون نام کاربری"}\n` +
-
-    `🆔 Bale ID: ${getUserId(message)}`;
-
-
-  try {
-
-    await baleRequest(
-      "sendDocument",
-      {
-        chat_id:
-          CONFIG.ADMIN_CHAT_ID,
-
-        document:
-          fileId,
-
-        caption
-      }
-    );
-
-
-    await pool.query(
-
-      `
-      UPDATE requests
-      SET
-        status = 'passenger_file_received',
-        updated_at = NOW()
-      WHERE request_code = $1
-      `,
-
-      [requestCode]
-    );
-
-
-    await clearSession(
-      getChatId(message)
-    );
-
-
-    await sendMessage(
-
-      getChatId(message),
-
-      "✅ فایل لیست مسافران با موفقیت برای مدیر ارسال شد.\n\n" +
-
-      `🆔 شماره درخواست: ${requestCode}`,
-
-      mainKeyboard(getChatId(message))
-    );
-
-
-    return true;
-
-  } catch (error) {
-
-    console.error(
-      "❌ Send passenger file error:",
-      error
-    );
-
-
-    await sendMessage(
-
-      getChatId(message),
-
-      "❌ ارسال فایل انجام نشد.\nلطفاً دوباره فایل را ارسال کنید."
-    );
-
-
-    return true;
+async function answerCallback(id){
+  try{
+    await bale("answerCallbackQuery",{callback_query_id:id});
+  }catch(e){
+    console.log("callback:",e.message);
   }
 }
-/* =========================================================
-   ثبت درخواست تور
-========================================================= */
 
-async function submitTourRequest(
-  chatId
-) {
-
-  const session =
-    await getSession(chatId);
-
-
-  if (!session) {
-
-    await sendMessage(
-      chatId,
-      "❌ اطلاعات درخواست پیدا نشد. لطفاً دوباره شروع کنید."
-    );
-
-    return;
-  }
-
-
-  const data =
-    session.data || {};
-
-
-  const messageInfo =
-    session.data.messageInfo || {};
-
-
-  const requestCode =
-    "SMT-" +
-    Math.floor(
-      1000 +
-      Math.random() * 9000
-    );
-
-
-  const payload = {
-
-    tourType:
-      data.tourType,
-
-    departureDate:
-      data.departureDate,
-
-    returnDate:
-      data.returnDate,
-
-    nights:
-      data.nights,
-
-    adults:
-      data.adults,
-
-    children:
-      data.children,
-
-    paymentType:
-      data.paymentType,
-
-    applicantName:
-      data.applicantName,
-
-    phone:
-      data.phone,
-
-    nationalCode:
-      data.nationalCode || "",
-
-    totalCost:
-      data.totalCost || null
+function mainKeyboard(){
+  return {
+    keyboard:[
+      [{text:"🏨 رزرو هتل"},{text:"🚌 تورهای مشهد"}],
+      [{text:"💎 طرح الماس شهر بهشت"},{text:"🧳 خدمات گردشگری"}],
+      [{text:"📞 تماس با ما"},{text:"📢 کانال"}]
+    ],
+    resize_keyboard:true
   };
-
-
-  await pool.query(
-
-    `
-    INSERT INTO requests
-    (
-      request_code,
-      user_id,
-      chat_id,
-      username,
-      applicant_name,
-      phone,
-      bale_id,
-      request_type,
-      payment_type,
-      payload,
-      status
-    )
-
-    VALUES
-    ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-    `,
-
-    [
-
-      requestCode,
-
-      String(chatId),
-
-      String(chatId),
-
-      messageInfo.username ||
-        getUsername(messageInfo) ||
-        "ندارد",
-
-      data.applicantName ||
-        messageInfo.firstName ||
-        "کاربر",
-
-      data.phone || "",
-
-      String(chatId),
-
-      data.tourType,
-
-      data.paymentType || "cash",
-
-      JSON.stringify(payload),
-
-      "pending"
-    ]
-  );
-
-
-  const typeNames = {
-
-    AIR:
-      "✈️ تور هوایی",
-
-    RAIL:
-      "🚆 تور ریلی",
-
-    BUS:
-      "🚌 تور اتوبوسی",
-
-    CARAVAN_BUS:
-      "🚍 کاروان اتوبوسی",
-
-    CARAVAN_RAIL:
-      "🚆 کاروان ریلی"
-  };
-
-
-  const paymentText =
-    data.paymentType === "loan"
-      ? "💎 طرح الماس"
-      : "💵 نقدی";
-
-
-  const adminText =
-
-    "📋 درخواست جدید سفر\n\n" +
-
-    `🆔 شماره درخواست: ${requestCode}\n\n` +
-
-    `🚍 نوع سفر: ${typeNames[data.tourType] || data.tourType}\n` +
-
-    `📅 ورود به مشهد: ${data.departureDate}\n` +
-
-    `📅 خروج از مشهد: ${data.returnDate}\n` +
-
-    `🌙 تعداد شب اقامت: ${data.nights} شب\n` +
-
-    `👨 بزرگسال: ${data.adults} نفر\n` +
-
-    `👧 کودک ۳ تا ۵ سال: ${data.children} نفر\n` +
-
-    `💳 پرداخت: ${paymentText}\n\n` +
-
-    `👤 نام و نام خانوادگی: ${data.applicantName}\n` +
-
-    `📱 شماره تماس: ${data.phone}\n` +
-
-    (
-      data.paymentType === "loan"
-        ? `🪪 کد ملی: ${data.nationalCode}\n`
-        : ""
-    ) +
-
-    `\n👤 کاربر بله: ${messageInfo.username || "ندارد"}\n` +
-
-    `🆔 Bale ID: ${chatId}`;
-       `\n👤 کاربر بله: ${messageInfo.username || "ندارد"}\n` +
-
-    `🆔 Bale ID: ${chatId}`;
-
-
-  await sendMessage(
-
-    CONFIG.ADMIN_CHAT_ID,
-
-    adminText,
-
-    {
-      inline_keyboard: [
-
-        [
-          {
-            text:
-              "✅ تأیید درخواست",
-
-            callback_data:
-              `APPROVE_REQUEST:${requestCode}`
-          },
-
-          {
-            text:
-              "❌ رد درخواست",
-
-            callback_data:
-              `REJECT_REQUEST:${requestCode}`
-          }
-        ]
-
-      ]
-    }
-  );
-
-
-  await clearSession(
-    chatId
-  );
-
-
-  await sendMessage(
-
-    chatId,
-
-    "✅ درخواست شما با موفقیت ثبت شد.\n\n" +
-
-    `🆔 شماره درخواست: ${requestCode}\n\n` +
-
-    "درخواست برای مدیر ارسال شد و پس از بررسی، نتیجه به شما اطلاع داده می‌شود.",
-
-    mainKeyboard(chatId)
-  );
 }
-/* =========================================================
-   CALLBACK های جدید
-========================================================= */
 
 function tourMenu(){
   return {
@@ -1816,1709 +129,1300 @@ function tourMenu(){
       [{text:"🚍 کاروان اتوبوسی",callback_data:"TOUR_CARAVAN_BUS"}],
       [{text:"🚆 کاروان ریلی",callback_data:"TOUR_CARAVAN_RAIL"}],
       [{text:"🏨 فقط هتل",callback_data:"TOUR_HOTEL"}],
-      [{text:"🔙 بازگشت",callback_data:"TOUR_BACK"}]
+      [{text:"🔙 بازگشت",callback_data:"BACK_MAIN"}]
     ]
   };
 }
 
-const TYPE_NAMES={
-  AIR:"✈️ تور هوایی",
-  RAIL:"🚆 تور ریلی",
-  BUS:"🚌 تور اتوبوسی",
-  CARAVAN_BUS:"🚍 کاروان اتوبوسی",
-  CARAVAN_RAIL:"🚆 کاروان ریلی",
-  HOTEL:"🏨 فقط هتل"
-};
-
-async function startTours(chatId){
-  await saveSession(chatId,"TOUR_CATEGORY",{});
-  await sendMessage(chatId,"🚌 تورهای مشهد\n\nنوع سفر موردنظر را انتخاب کنید:",tourMenu());
+function backKeyboard(){
+  return {
+    inline_keyboard:[
+      [
+        {text:"🔙 بازگشت",callback_data:"TOUR_BACK"},
+        {text:"❌ لغو",callback_data:"TOUR_CANCEL"}
+      ]
+    ]
+  };
 }
 
-async function startTourType(chatId,type){
-  await saveSession(chatId,"TOUR_DATE",{tourType:type});
-  await sendMessage(chatId,`${TYPE_NAMES[type]}\n\n📅 تاریخ ورود به مشهد را وارد کنید.\n\nمثال: ۱۴۰۵/۰۷/۱۰`,{inline_keyboard:[[{text:"🔙 بازگشت",callback_data:"TOUR_BACK"}]]});
+function diamondPlanText(){
+  return `💎 طرح الماس شهر بهشت
+
+۱️⃣ نصب کیوبانک مهر
+۲️⃣ تکمیل احراز هویت
+۳️⃣ انجام اعتبارسنجی
+۴️⃣ دریافت رتبه اعتباری
+
+🟢 رتبه A و B: بدون ضامن؛ خودت ضامن حسابت هستی.
+
+🟡 رتبه C و D و پایین‌تر: یک ضامن + نامه کسر از حقوق + فیش حقوقی
+
+⏳ بازپرداخت: ۱۲ ماهه
+💰 سود: ۳ درصد
+🚫 بدون مراجعه به شعبه
+📄 اصل مدارک باید بارگذاری شود.
+
+💳 پس از تأیید، مسافر باید ۴۰٪ هزینه کل سفر را پرداخت کند و رسید را ارسال نماید.
+
+☎️ پشتیبانی: ${CONFIG.CONTACT.phone}`;
 }
 
-async function handleTourCallback(
-  callback
-) {
+function sendDiamondPlan(chatId){
+  return sendMessage(
+    chatId,
+    diamondPlanText(),
+    {
+      inline_keyboard:[
+        [{text:"📲 نصب کیوبانک مهر",url:CONFIG.DIAMOND_QBANK_URL}],
+        [{text:"🔙 بازگشت",callback_data:"DIAMOND_BACK"}]
+      ]
+    }
+  );
+}
 
-  const data =
-    callback.data || "";
+function paymentInfoText(){
+  return `💵 اطلاعات پرداخت
 
-  const message =
-    callback.message;
+🏦 بانک: ${CONFIG.PAYMENT.bank}
+👤 به نام: ${CONFIG.PAYMENT.owner}
 
-  const chatId =
-    message?.chat?.id;
+💳 شماره کارت:
+${CONFIG.PAYMENT.card}
 
-  if (!chatId) {
-    return true;
+🏦 شماره حساب:
+${CONFIG.PAYMENT.account}
+
+🔗 شماره شبا:
+${CONFIG.PAYMENT.iban}
+
+⚠️ پس از پرداخت، تصویر فیش واریزی را همین‌جا ارسال کنید.`;
+}
+
+function diamondPaymentText(req){
+  const total=Number(req.payload?.totalCost||0);
+
+  if(total>0){
+    const cash=Math.ceil(total*.4);
+
+    return `💎 درخواست طرح الماس تأیید شد.
+
+🆔 درخواست: ${req.request_code}
+💰 هزینه کل سفر: ${money(total)} تومان
+💳 سهم نقدی ۴۰٪: ${money(cash)} تومان
+
+لطفاً مبلغ را پرداخت کنید و تصویر فیش را ارسال نمایید.`;
   }
 
+  return `💎 درخواست طرح الماس تأیید شد.
 
-  /* انتخاب نوع تور */
+🆔 درخواست: ${req.request_code}
 
-  if (data === "TOUR_AIR") {
+پس از مشخص شدن مبلغ نهایی، ۴۰٪ آن را پرداخت کنید و تصویر فیش را ارسال نمایید.`;
+}
+async function startTour(chatId,type){
+  await saveSession(chatId,"TOUR_DATE_IN",{tourType:type});
+  await sendMessage(
+    chatId,
+    `📋 ${TOUR_NAMES[type]}
 
-    await startTourType(
-      chatId,
-      "AIR"
-    );
+📅 تاریخ ورود به مشهد را وارد کنید.
+مثال: ۱۴۰۵/۰۷/۱۳`,
+    backKeyboard()
+  );
+}
 
-    return true;
+async function askTourOut(chatId,d){
+  await saveSession(chatId,"TOUR_DATE_OUT",d);
+  await sendMessage(chatId,"📅 تاریخ خروج از مشهد را وارد کنید.\nمثال: ۱۴۰۵/۰۷/۱۶",backKeyboard());
+}
+
+async function askNights(chatId,d){
+  await saveSession(chatId,"TOUR_NIGHTS",d);
+  await sendMessage(chatId,"🌙 تعداد شب اقامت را وارد کنید.\nمثال: ۳",backKeyboard());
+}
+
+async function askAdults(chatId,d){
+  await saveSession(chatId,"TOUR_ADULTS",d);
+  await sendMessage(chatId,"👨 تعداد بزرگسال را وارد کنید.\nمثال: ۲",backKeyboard());
+}
+
+async function askChildren(chatId,d){
+  await saveSession(chatId,"TOUR_CHILDREN",d);
+  await sendMessage(
+    chatId,
+    "👶 تعداد کودک ۳ تا ۵ سال را وارد کنید.\nاگر کودک ندارید ۰ بفرستید.",
+    backKeyboard()
+  );
+}
+
+async function askPayment(chatId,d){
+  await saveSession(chatId,"TOUR_PAYMENT",d);
+  await sendMessage(
+    chatId,
+    "💳 نوع پرداخت را انتخاب کنید:",
+    {
+      inline_keyboard:[
+        [{text:"💵 پرداخت نقدی",callback_data:"TOUR_PAYMENT_CASH"}],
+        [{text:"💎 طرح الماس شهر بهشت",callback_data:"TOUR_PAYMENT_LOAN"}],
+        [{text:"🔙 بازگشت",callback_data:"TOUR_BACK"}]
+      ]
+    }
+  );
+}
+
+async function askName(chatId,d){
+  await saveSession(chatId,"TOUR_NAME",d);
+  await sendMessage(chatId,"👤 لطفاً نام و نام خانوادگی خود را وارد کنید.",backKeyboard());
+}
+
+async function askPhone(chatId,d){
+  await saveSession(chatId,"TOUR_PHONE",d);
+  await sendMessage(chatId,"📱 شماره تماس را وارد کنید.\nمثال: ۰۹۱۷۷۷۰۰۹۶۱",backKeyboard());
+}
+
+async function askNational(chatId,d){
+  await saveSession(chatId,"TOUR_NATIONAL",d);
+  await sendMessage(chatId,"🪪 کد ملی متقاضی اصلی را وارد کنید.",backKeyboard());
+}
+
+async function showConfirm(chatId,d){
+  let s=`📋 بررسی نهایی درخواست
+━━━━━━━━━━━━━━━━━━
+🚍 نوع سفر: ${TOUR_NAMES[d.tourType]}
+📅 ورود به مشهد: ${d.departureDate}
+📅 خروج از مشهد: ${d.returnDate}
+🌙 تعداد شب: ${d.nights}
+👨 بزرگسال: ${d.adults} نفر
+👶 کودک ۳ تا ۵ سال: ${d.children} نفر
+💳 پرداخت: ${d.paymentType==="loan"?"💎 طرح الماس":"💵 نقدی"}
+👤 نام: ${d.applicantName}
+📱 تلفن: ${d.phone}
+`;
+
+  if(d.paymentType==="loan"){
+    s+=`🪪 کد ملی: ${d.nationalCode}\n`;
   }
 
+  s+="━━━━━━━━━━━━━━━━━━\nآیا اطلاعات صحیح است؟";
 
-  if (data === "TOUR_RAIL") {
+  await saveSession(chatId,"TOUR_CONFIRM",d);
 
-    await startTourType(
-      chatId,
-      "RAIL"
-    );
+  await sendMessage(
+    chatId,
+    s,
+    {
+      inline_keyboard:[
+        [{text:"✅ ارسال درخواست",callback_data:"TOUR_SUBMIT"}],
+        [{text:"✏️ اصلاح",callback_data:"TOUR_EDIT"}],
+        [{text:"❌ لغو",callback_data:"TOUR_CANCEL"}]
+      ]
+    }
+  );
+}
 
-    return true;
+async function handleTourText(chatId,text,s){
+  const d=s.data||{};
+
+  if(s.state==="TOUR_DATE_IN"){
+    const x=normalizeDate(text);
+    if(!x){
+      await sendMessage(chatId,"❌ تاریخ صحیح نیست. مثال: ۱۴۰۵/۰۷/۱۳");
+      return true;
+    }
+    return askTourOut(chatId,{...d,departureDate:x}).then(()=>true);
   }
 
-
-  if (data === "TOUR_BUS") {
-
-    await startTourType(
-      chatId,
-      "BUS"
-    );
-
-    return true;
+  if(s.state==="TOUR_DATE_OUT"){
+    const x=normalizeDate(text);
+    if(!x){
+      await sendMessage(chatId,"❌ تاریخ صحیح نیست. مثال: ۱۴۰۵/۰۷/۱۶");
+      return true;
+    }
+    return askNights(chatId,{...d,returnDate:x}).then(()=>true);
   }
 
-
-  if (data === "TOUR_CARAVAN_BUS") {
-
-    await startTourType(
-      chatId,
-      "CARAVAN_BUS"
-    );
-
-    return true;
+  if(s.state==="TOUR_NIGHTS"){
+    const n=Number(en(text).replace(/\D/g,""));
+    if(!Number.isInteger(n)||n<=0){
+      await sendMessage(chatId,"❌ تعداد شب صحیح نیست.");
+      return true;
+    }
+    return askAdults(chatId,{...d,nights:n}).then(()=>true);
   }
 
-
-  if (data === "TOUR_CARAVAN_RAIL") {
-
-    await startTourType(
-      chatId,
-      "CARAVAN_RAIL"
-    );
-
-    return true;
+  if(s.state==="TOUR_ADULTS"){
+    const n=Number(en(text).replace(/\D/g,""));
+    if(!Number.isInteger(n)||n<=0){
+      await sendMessage(chatId,"❌ تعداد بزرگسال باید حداقل ۱ نفر باشد.");
+      return true;
+    }
+    return askChildren(chatId,{...d,adults:n}).then(()=>true);
   }
 
-
-  /* رزرو هتل فعلاً غیرفعال */
-
-  if (data === "TOUR_HOTEL") {
-
-    await sendMessage(
-
-      chatId,
-
-      "🏨 رزرو هتل فعلاً غیرفعال است.\n\n" +
-      "لطفاً از بخش تورهای مشهد استفاده کنید."
-    );
-
-    return true;
+  if(s.state==="TOUR_CHILDREN"){
+    const n=Number(en(text).replace(/\D/g,""));
+    if(!Number.isInteger(n)||n<0){
+      await sendMessage(chatId,"❌ تعداد کودک صحیح نیست.");
+      return true;
+    }
+    return askPayment(chatId,{...d,children:n}).then(()=>true);
   }
 
-
-  if (data === "TOUR_BACK") {
-    await startTours(chatId);
-    return true;
+  if(s.state==="TOUR_NAME"){
+    if(text.length<3){
+      await sendMessage(chatId,"❌ نام و نام خانوادگی را کامل وارد کنید.");
+      return true;
+    }
+    return askPhone(chatId,{...d,applicantName:text}).then(()=>true);
   }
 
+  if(s.state==="TOUR_PHONE"){
+    const p=en(text).replace(/\s/g,"");
 
-  /* پرداخت نقدی */
+    if(!validPhone(p)){
+      await sendMessage(chatId,"❌ شماره تماس صحیح نیست.");
+      return true;
+    }
 
-  if (
-    data === "TOUR_PAYMENT_CASH"
-  ) {
+    if(d.paymentType==="loan"){
+      return askNational(chatId,{...d,phone:p}).then(()=>true);
+    }
 
-    const session =
-      await getSession(chatId);
-
-
-    await askTourName(
-
-      chatId,
-
-      {
-        ...session.data,
-
-        paymentType:
-          "cash"
-      }
-    );
-
-    return true;
+    return showConfirm(chatId,{...d,phone:p}).then(()=>true);
   }
 
+  if(s.state==="TOUR_NATIONAL"){
+    const n=en(text).replace(/\D/g,"");
 
-  /* طرح الماس */
+    if(!validNational(n)){
+      await sendMessage(chatId,"❌ کد ملی باید ۱۰ رقم باشد.");
+      return true;
+    }
 
-  if (
-    data === "TOUR_PAYMENT_LOAN"
-  ) {
-
-    const session =
-      await getSession(chatId);
-
-
-    await askTourName(
-
-      chatId,
-
-      {
-        ...session.data,
-
-        paymentType:
-          "loan"
-      }
-    );
-
-    return true;
+    return showConfirm(chatId,{...d,nationalCode:n}).then(()=>true);
   }
-
-
-  /* ارسال درخواست */
-
-  if (
-    data === "TOUR_SUBMIT"
-  ) {
-
-    await submitTourRequest(
-      chatId
-    );
-
-    return true;
-  }
-
-
-  /* اصلاح */
-
-  if (
-    data === "TOUR_EDIT"
-  ) {
-
-    const session =
-      await getSession(chatId);
-
-
-    await saveSession(
-
-      chatId,
-
-      "TOUR_DATE",
-
-      session.data
-    );
-
-
-    await sendMessage(
-
-      chatId,
-
-      "📅 لطفاً تاریخ ورود به مشهد را دوباره وارد کنید."
-    );
-
-    return true;
-  }
-
-
-  /* لغو */
-
-  if (
-    data === "TOUR_CANCEL"
-  ) {
-
-    await clearSession(
-      chatId
-    );
-
-
-    await sendMessage(
-
-      chatId,
-
-      "❌ درخواست لغو شد.",
-
-      mainKeyboard(chatId)
-    );
-
-    return true;
-  }
-
-
-  /* بازگشت از طرح الماس */
-
-  if (
-    data === "DIAMOND_BACK"
-  ) {
-
-    await sendMessage(
-
-      chatId,
-
-      "لطفاً یکی از گزینه‌های منو را انتخاب کنید.",
-
-      mainKeyboard(chatId)
-    );
-
-    return true;
-  }
-
 
   return false;
 }
-/* =========================================================
-   تأیید درخواست مدیر
-========================================================= */
 
-async function approveRequest(
-  chatId,
-  code
-) {
+function requestCode(){
+  return `SMT-${Date.now().toString().slice(-6)}${Math.floor(Math.random()*90+10)}`;
+}
 
-  if (!isAdmin(chatId)) {
-    return;
-  }
+async function submitRequest(chatId){
+  const s=await getSession(chatId);
+  if(!s)return;
 
-
-  const result =
-    await pool.query(
-
-      `
-      SELECT *
-      FROM requests
-      WHERE request_code = $1
-      `,
-
-      [code]
-    );
-
-
-  if (!result.rows.length) {
-
-    await sendMessage(
-      chatId,
-      "❌ درخواست پیدا نشد."
-    );
-
-    return;
-  }
-
-
-  const request =
-    result.rows[0];
-
+  const d=s.data||{};
+  const code=requestCode();
+  const info=d.messageInfo||{};
+  const nationalCode=d.nationalCode||d.national_code||"";
+  const payload={...d,nationalCode};
 
   await pool.query(
+    `INSERT INTO requests(
+      request_code,user_id,chat_id,username,applicant_name,phone,
+      bale_id,request_type,payment_type,payload,status
+    )
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending')`,
+    [
+      code,
+      String(chatId),
+      String(chatId),
+      info.username||"ندارد",
+      d.applicantName,
+      d.phone,
+      String(chatId),
+      d.tourType,
+      d.paymentType,
+      JSON.stringify(payload)
+    ]
+  );
 
-    `
-    UPDATE requests
-    SET
-      status = 'approved',
-      updated_at = NOW()
-    WHERE request_code = $1
-    `,
+  let admin=`📋 درخواست جدید سفر
+━━━━━━━━━━━━━━━━━━
+🆔 ${code}
+🚍 ${TOUR_NAMES[d.tourType]}
+📅 ورود: ${d.departureDate}
+📅 خروج: ${d.returnDate}
+🌙 شب: ${d.nights}
+👨 بزرگسال: ${d.adults}
+👶 کودک: ${d.children}
+💳 پرداخت: ${d.paymentType==="loan"?"💎 طرح الماس":"💵 نقدی"}
+👤 ${d.applicantName}
+📱 ${d.phone}
+`;
 
+  if(nationalCode){
+    admin+=`🪪 کد ملی: ${nationalCode}\n`;
+  }
+
+  admin+=`👤 بله: ${info.username||"ندارد"}
+🆔 Bale ID: ${chatId}`;
+
+  const buttons=[
+    [
+      {text:"✅ تأیید درخواست",callback_data:`APPROVE_REQUEST:${code}`},
+      {text:"❌ رد درخواست",callback_data:`REJECT_REQUEST:${code}`}
+    ]
+  ];
+
+  if(d.tourType==="RAIL"){
+    buttons.push([
+      {text:"🧮 محاسبه این درخواست",callback_data:`CALC_REQUEST:${code}`}
+    ]);
+  }
+
+  await sendMessage(CONFIG.ADMIN_CHAT_ID,admin,{inline_keyboard:buttons});
+
+  await clearSession(chatId);
+
+  await sendMessage(
+    chatId,
+    `✅ درخواست شما ثبت شد.
+
+🆔 شماره درخواست: ${code}
+
+پس از بررسی مدیر، نتیجه به شما اطلاع داده می‌شود.`,
+    mainKeyboard()
+  );
+}
+
+async function approveRequest(adminId,code){
+  if(!isAdmin(adminId))return;
+
+  const r=await pool.query(
+    "SELECT * FROM requests WHERE request_code=$1",
     [code]
   );
 
+  if(!r.rows.length){
+    await sendMessage(adminId,"❌ درخواست پیدا نشد.");
+    return;
+  }
 
-  await sendMessage(
+  const req=r.rows[0];
+  const payload=req.payload||{};
 
-    chatId,
-
-    `✅ درخواست ${code} تأیید شد.`
+  await pool.query(
+    "UPDATE requests SET status='approved',updated_at=NOW() WHERE request_code=$1",
+    [code]
   );
 
+  await sendMessage(adminId,`✅ درخواست ${code} تأیید شد.`);
 
-  const payload =
-    request.payload || request.data || {};
+  if(req.payment_type==="loan"){
+    await sendMessage(req.user_id,diamondPaymentText(req));
+  }else{
+    await sendMessage(
+      req.user_id,
+      "✅ درخواست شما تأیید شد.\n\n"+paymentInfoText()+`\n\n🆔 شماره درخواست: ${code}`
+    );
+  }
 
+  await saveSession(
+    req.user_id,
+    "PAYMENT_RECEIPT",
+    {
+      requestCode:code,
+      tourType:payload.tourType,
+      paymentType:req.payment_type,
+      applicantName:req.applicant_name,
+      phone:req.phone
+    }
+  );
 
-  /* ================================================
-     کاروان / تور هوایی / تور ریلی
-  ================================================ */
+  await sendMessage(
+    req.user_id,
+    "🧾 لطفاً تصویر رسید پرداخت را ارسال کنید.\n\nپس از دریافت رسید، در صورت نیاز لیست همراهان/مسافران را از شما دریافت می‌کنیم."
+  );
+}
 
-  const needsPassengerFile =
+async function rejectRequest(adminId,code){
+  if(!isAdmin(adminId))return;
+
+  const r=await pool.query(
+    "SELECT * FROM requests WHERE request_code=$1",
+    [code]
+  );
+
+  if(!r.rows.length){
+    await sendMessage(adminId,"❌ درخواست پیدا نشد.");
+    return;
+  }
+
+  const req=r.rows[0];
+
+  await pool.query(
+    "UPDATE requests SET status='rejected',updated_at=NOW() WHERE request_code=$1",
+    [code]
+  );
+
+  await sendMessage(adminId,`❌ درخواست ${code} رد شد.`);
+
+  await sendMessage(
+    req.user_id,
+    `❌ درخواست شما تأیید نشد.
+
+🆔 ${code}
+☎️ ${CONFIG.CONTACT.phone}`,
+    mainKeyboard()
+  );
+}
+
+async function afterReceipt(chatId,session){
+  const d=session.data||{};
+
+  await pool.query(
+    "UPDATE requests SET status='receipt_received',updated_at=NOW() WHERE request_code=$1",
+    [d.requestCode]
+  );
+
+  if(NEED_PASSENGER_LIST.includes(d.tourType)){
+    await saveSession(chatId,"PASSENGER_LIST",d);
+
+    await sendMessage(
+      chatId,
+      `✅ رسید پرداخت دریافت شد.
+
+📋 لطفاً لیست ${d.tourType.startsWith("CARAVAN")?"مسافران":"همراهان"} را ارسال کنید.
+
+مشخصات هر نفر:
+نام و نام خانوادگی | کد ملی | تاریخ تولد
+
+مثال:
+علی رضایی | ۱۲۳۴۵۶۷۸۹۰ | ۱۳۶۲/۰۶/۱۷
+
+می‌توانید متن، تصویر یا فایل ارسال کنید.`
+    );
+  }else{
+    await clearSession(chatId);
+    await sendMessage(
+      chatId,
+      "✅ رسید پرداخت دریافت شد و درخواست برای ادامه کار ثبت گردید.",
+      mainKeyboard()
+    );
+  }
+}
+async function handlePassengerText(chatId,text,session){
+  if(session.state!=="PASSENGER_LIST")return false;
+
+  const lines=text
+    .split(/\r?\n/)
+    .map(x=>x.trim())
+    .filter(Boolean);
+
+  if(!lines.length){
+    await sendMessage(chatId,"❌ لیست خالی است.");
+    return true;
+  }
+
+  const good=[];
+
+  for(const line of lines){
+    const p=line.split("|").map(x=>x.trim());
+
+    if(p.length!==3){
+      await sendMessage(
+        chatId,
+        `❌ این خط صحیح نیست:
+${line}
+
+فرمت:
+نام و نام خانوادگی | کد ملی | ۱۳۶۲/۰۶/۱۷`
+      );
+      return true;
+    }
+
+    const nc=en(p[1]).replace(/\D/g,"");
+    const bd=normalizeDate(p[2]);
+
+    if(!p[0]||!validNational(nc)||!bd){
+      await sendMessage(
+        chatId,
+        `❌ اطلاعات این خط صحیح نیست:
+${line}`
+      );
+      return true;
+    }
+
+    good.push({
+      name:p[0],
+      nationalCode:nc,
+      birthDate:bd
+    });
+  }
+
+  await sendMessage(
+    CONFIG.ADMIN_CHAT_ID,
+    `📋 لیست همراهان/مسافران
+🆔 درخواست: ${session.data.requestCode}
+👤 کاربر: ${session.data.applicantName}
+📱 ${session.data.phone}
+
+`+
+    good.map(
+      (x,i)=>`${i+1}. ${x.name} | ${x.nationalCode} | ${x.birthDate}`
+    ).join("\n")
+  );
+
+  await pool.query(
+    "UPDATE requests SET status='passenger_received',payload=payload || $2::jsonb,updated_at=NOW() WHERE request_code=$1",
     [
-      "AIR",
-      "RAIL",
-      "CARAVAN_BUS",
-      "CARAVAN_RAIL"
-    ].includes(
-      payload.tourType
+      session.data.requestCode,
+      JSON.stringify({passengers:good})
+    ]
+  );
+
+  await clearSession(chatId);
+
+  await sendMessage(
+    chatId,
+    "✅ لیست با موفقیت دریافت و برای مدیر ارسال شد.",
+    mainKeyboard()
+  );
+
+  return true;
+}
+
+async function handleMedia(message,session){
+  const chatId=getChatId(message);
+
+  if(message.photo?.length && session?.state==="PAYMENT_RECEIPT"){
+    const photo=message.photo[message.photo.length-1];
+
+    await sendPhoto(
+      CONFIG.ADMIN_CHAT_ID,
+      photo.file_id,
+      `🧾 رسید پرداخت
+🆔 درخواست: ${session.data.requestCode}
+👤 ${session.data.applicantName}
+📱 ${session.data.phone}`
     );
 
-
-  if (needsPassengerFile) {
-
-    await askPassengerFile(
-
-      request.user_id,
-
-      code,
-
-      payload.tourType
-    );
+    await afterReceipt(chatId,session);
+    return true;
   }
 
-
-  /* ================================================
-     پرداخت نقدی
-  ================================================ */
-
-  if (
-    request.payment_type ===
-    "cash"
-  ) {
-
-    await sendMessage(
-
-      request.user_id,
-
-      "✅ درخواست سفر شما توسط مدیر تأیید شد.\n\n" +
-
-      cashAccountText() +
-
-      `\n\n🆔 شماره درخواست: ${code}`
+  if(message.document?.file_id && session?.state==="PAYMENT_RECEIPT"){
+    await sendDocument(
+      CONFIG.ADMIN_CHAT_ID,
+      message.document.file_id,
+      `🧾 رسید پرداخت
+🆔 درخواست: ${session.data.requestCode}
+👤 ${session.data.applicantName}`
     );
+
+    await afterReceipt(chatId,session);
+    return true;
   }
 
+  if(message.photo?.length && session?.state==="PASSENGER_LIST"){
+    const p=message.photo[message.photo.length-1];
 
-  /* ================================================
-     طرح الماس
-  ================================================ */
-
-  if (
-    request.payment_type ===
-    "loan"
-  ) {
-
-    await sendMessage(
-
-      request.user_id,
-
-      diamondPaymentText(
-        request
-      )
+    await sendPhoto(
+      CONFIG.ADMIN_CHAT_ID,
+      p.file_id,
+      `📋 تصویر لیست مسافران
+🆔 درخواست: ${session.data.requestCode}`
     );
 
+    await pool.query(
+      "UPDATE requests SET status='passenger_received',updated_at=NOW() WHERE request_code=$1",
+      [session.data.requestCode]
+    );
+
+    await clearSession(chatId);
 
     await sendMessage(
+      chatId,
+      "✅ تصویر لیست دریافت و برای مدیر ارسال شد.",
+      mainKeyboard()
+    );
 
-      request.user_id,
+    return true;
+  }
 
-      "📌 مراحل طرح الماس:\n\n" +
+  if(message.document?.file_id && session?.state==="PASSENGER_LIST"){
+    await sendDocument(
+      CONFIG.ADMIN_CHAT_ID,
+      message.document.file_id,
+      `📋 فایل لیست مسافران
+🆔 درخواست: ${session.data.requestCode}`
+    );
 
-      "۱️⃣ نصب کیوبانک مهر\n" +
+    await pool.query(
+      "UPDATE requests SET status='passenger_received',updated_at=NOW() WHERE request_code=$1",
+      [session.data.requestCode]
+    );
 
-      "۲️⃣ تکمیل احراز هویت\n" +
+    await clearSession(chatId);
 
-      "۳️⃣ اعتبارسنجی\n" +
+    await sendMessage(
+      chatId,
+      "✅ فایل لیست دریافت و برای مدیر ارسال شد.",
+      mainKeyboard()
+    );
 
-      "۴️⃣ دریافت رتبه اعتباری\n\n" +
+    return true;
+  }
 
-      "🟢 رتبه A و B: بدون ضامن\n" +
+  return false;
+}
 
-      "🟡 رتبه C و D و پایین‌تر: یک ضامن + نامه کسر از حقوق + فیش حقوقی\n\n" +
+function managerCalcMenu(){
+  return {
+    inline_keyboard:[
+      [{text:"🚆 محاسبه تور ریلی",callback_data:"ADMIN_RAIL_CALC"}],
+      [{text:"✈️ محاسبه دستی تور هوایی",callback_data:"ADMIN_MANUAL_AIR"}],
+      [{text:"🚌 محاسبه دستی تور اتوبوسی",callback_data:"ADMIN_MANUAL_BUS"}],
+      [{text:"🚍 محاسبه دستی کاروان اتوبوسی",callback_data:"ADMIN_MANUAL_CARAVAN_BUS"}],
+      [{text:"🚆 محاسبه دستی کاروان ریلی",callback_data:"ADMIN_MANUAL_CARAVAN_RAIL"}],
+      [{text:"🔙 خروج",callback_data:"ADMIN_CALC_EXIT"}]
+    ]
+  };
+}
 
-      "📄 اصل مدارک باید بارگذاری شود.\n\n" +
+async function startRailCalc(chatId,prefill={}){
+  await saveSession(chatId,"RAIL_ROUTE",prefill);
 
-      "پس از تکمیل مراحل، اطلاعات حساب بانکی را ارسال کنید.",
+  await sendMessage(
+    chatId,
+    "🧮 محاسبه داخلی تور ریلی\n\nابتدا مسیر را انتخاب کنید:",
+    {
+      inline_keyboard:[
+        [{text:"🚆 اهواز ↔ مشهد",callback_data:"RAIL_ROUTE:AHVAZ"}],
+        [{text:"🚆 شیراز ↔ مشهد",callback_data:"RAIL_ROUTE:SHIRAZ"}],
+        [{text:"🔙 خروج",callback_data:"ADMIN_CALC_EXIT"}]
+      ]
+    }
+  );
+}
 
+async function railText(chatId,text,s){
+  const d=s.data||{};
+  const v=Number(en(text).replace(/\D/g,""));
+
+  if(s.state==="RAIL_ADULTS"){
+    if(v<=0){
+      await sendMessage(chatId,"❌ تعداد بزرگسال صحیح نیست.");
+      return true;
+    }
+
+    await saveSession(chatId,"RAIL_CHILDREN",{...d,adults:v});
+
+    await sendMessage(
+      chatId,
+      "👶 تعداد کودک ۲ تا ۱۲ سال را وارد کنید.\nاگر کودک ندارید ۰ بفرستید:"
+    );
+
+    return true;
+  }
+
+  if(s.state==="RAIL_CHILDREN"){
+    if(v<0){
+      await sendMessage(chatId,"❌ تعداد کودک صحیح نیست.");
+      return true;
+    }
+
+    await saveSession(chatId,"RAIL_NIGHTS",{...d,children:v});
+    await sendMessage(chatId,"🌙 تعداد شب اقامت را وارد کنید:");
+
+    return true;
+  }
+
+  if(s.state==="RAIL_NIGHTS"){
+    if(v<=0){
+      await sendMessage(chatId,"❌ تعداد شب صحیح نیست.");
+      return true;
+    }
+
+    await saveSession(chatId,"RAIL_HOTEL",{...d,nights:v});
+
+    await sendMessage(
+      chatId,
+      "🏨 قیمت هتل هر نفر / هر شب را وارد کنید.\nمثال: ۲۲۰۰۰۰۰"
+    );
+
+    return true;
+  }
+
+  if(s.state==="RAIL_HOTEL"){
+    if(v<=0){
+      await sendMessage(chatId,"❌ قیمت هتل صحیح نیست.");
+      return true;
+    }
+
+    await saveSession(
+      chatId,
+      "RAIL_PAYMENT",
+      {...d,hotelPricePerPersonPerNight:v}
+    );
+
+    await sendMessage(
+      chatId,
+      "💳 نوع محاسبه را انتخاب کنید:",
       {
-        inline_keyboard: [
-
+        inline_keyboard:[
           [
-            {
-              text:
-                "📲 نصب کیوبانک مهر",
-
-              url:
-                "https://qbank24.ir/downloads"
-            }
-          ]
-
+            {text:"💵 نقدی",callback_data:"RAIL_PAYMENT_CASH"},
+            {text:"💎 طرح الماس",callback_data:"RAIL_PAYMENT_LOAN"}
+          ],
+          [{text:"🔙 خروج",callback_data:"ADMIN_CALC_EXIT"}]
         ]
       }
     );
+
+    return true;
   }
+
+  return false;
 }
-/* =========================================================
-   دریافت پیام
-========================================================= */
 
-async function handleMessage(
-  message
-) {
-
-  const chatId =
-    message?.chat?.id;
-
-  if (!chatId) {
-    return;
-  }
-
-
-  /* فایل لیست مسافران */
-
-  const session =
-    await getSession(chatId);
-
-
-  if (
-    message.document &&
-    session?.state ===
-      "WAITING_PASSENGER_FILE"
-  ) {
-
-    await forwardPassengerDocument(
-      message,
-      session
-    );
-
-    return;
-  }
-
-
-  const text =
-    String(
-      message.text || ""
-    ).trim();
-
-
-  /* شروع */
-
-  if (
-    text === "/start"
-  ) {
-
-    await clearSession(
-      chatId
-    );
-
-    await saveSession(
-      chatId,
-      "MAIN",
-      {}
-    );
-
-
-    await sendMessage(
-
-      chatId,
-
-      "🌹 به ربات سفر مشهد توس خو
-       ش آمدید.\n\n" +
-
-      "برای دریافت خدمات گردشگری گزینه موردنظر را انتخاب کنید.",
-
-      mainKeyboard(chatId)
-    );
-
-    return;
-  }
-
-
-  /* منوی اصلی */
-
-  if (
-    text === "🚌 تورهای مشهد"
-  ) {
-
-    await startTours(
-      chatId
-    );
-
-    return;
-  }
-
-
-  /* هتل غیرفعال */
-
-  if (
-    text === "🏨 رزرو هتل"
-  ) {
-
-    await sendMessage(
-
-      chatId,
-
-      "🏨 رزرو هتل فعلاً غیر فعال است.\n\n" +
-      "به‌زودی این بخش فعال خواهد شد.",
-
-      mainKeyboard(chatId)
-    );
-
-    return;
-  }
-
-
-  if(text==="🧮 محاسبات مدیر"){if(isAdmin(chatId))await showManagerCalculations(chatId);return;}
-
-  /* طرح الماس */
-
-  if (
-    text ===
-      "💎 طرح الماس شهر بهشت"
-  ) {
-
-    await sendDiamondPlan(
-      chatId
-    );
-
-    return;
-  }
-
-
-  /* خدمات */
-
-  if (
-    text ===
-      "🧳 خدمات گردشگری"
-  ) {
-
-    await sendMessage(
-
-      chatId,
-
-      "🧳 خدمات گردشگری\n\n" +
-
-      "✈️ تورهای هوایی\n" +
-      "🚆 تورهای ریلی\n" +
-      "🚌 تورهای اتوبوسی\n" +
-      "🚍 کاروان‌های زیارتی\n" +
-      "🏨 رزرو هتل — فعلاً غیرفعال\n\n" +
-
-      `☎️ ${CONFIG.CONTACT.phone}`,
-
-      mainKeyboard(chatId)
-    );
-
-    return;
-  }
-
-
-  /* تماس */
-
-  if (
-    text ===
-      "📞 تماس با ما"
-  ) {
-
-    await sendMessage(
-
-      chatId,
-
-      "📞 تماس با ما\n\n" +
-
-      `👤 ${CONFIG.CONTACT.name}\n` +
-
-      `☎️ ${CONFIG.CONTACT.phone}`,
-
-      mainKeyboard(chatId)
-    );
-
-    return;
-  }
-
-
-  /* کانال */
-
-  if (
-    text ===
-      "📢 کانال"
-  ) {
-
-    await sendMessage(
-
-      chatId,
-
-      `📢 کانال سفر مشهد توس\n\n${CONFIG.CHANNEL_URL}`,
-
-      mainKeyboard(chatId)
-    );
-
-    return;
-  }
-
-
-  if(session&&isAdmin(chatId)){if(await handleRailCalculationText(chatId,text,session))return;if(await handleManagerCalculationText(chatId,text,session))return;}
-
-  /* فرم تور */
-
-  if (session) {
-
-    const handled =
-      await handleTourText(
-        chatId,
-        text,
-        session
-      );
-
-    if (handled) {
-      return;
-    }
-  }
-
-
-  await sendMessage(
-
-    chatId,
-
-    "لطفاً یکی از گزینه‌های منو را انتخاب کنید.",
-
-    mainKeyboard(chatId)
-  );
-}
-/* =========================================================
-   CALLBACK اصلی
-========================================================= */
-
-async function handleCallback(
-  callback
-) {
-
-  const data =
-    callback?.data || "";
-
-  const message =
-    callback?.message;
-
-  const chatId =
-    message?.chat?.id;
-
-  if (!chatId) {
-    return;
-  }
-
-
-  console.log(
-    "📞 CALLBACK:",
-    data,
-    "chatId:",
-    chatId
-  );
-
-
-  await answerCallback(
-    callback.id
-  );
-
-
-  /* Callback تور */
-
-  const tourHandled =
-    await handleTourCallback(
-      callback
-    );
-
-  if (tourHandled) {
-    return;
-  }
-
-
-  if(data==="ADMIN_CALC_MENU"){if(!isAdmin(chatId))return;await showManagerCalculations(chatId);return;}
-  if(data.startsWith("RAILCALC_ROUTE:")){
-    if(!isAdmin(chatId))return;
-    const route=data.split(":")[1];
-    await showRailTrainSelection(chatId,route);
-    return;
-  }
-
-  if(data.startsWith("RAILCALC_TRAIN:")){
-    if(!isAdmin(chatId))return;
-    const parts=data.split(":");
-    const route=parts[1];
-    const trainId=parts.slice(2).join(":");
-    const train=CONFIG.RAIL?.TICKET_PRICES?.[route]?.TRAINS?.find(x=>String(x.id)===String(trainId));
-
-    if(!train){
-      await sendMessage(chatId,"❌ قطار انتخاب‌شده پیدا نشد.");
-      return;
+async function manualText(chatId,text,s){
+  const d=s.data||{};
+  const v=Number(en(text).replace(/\D/g,""));
+
+  if(s.state==="MAN_ADULTS"){
+    if(v<=0){
+      await sendMessage(chatId,"❌ تعداد بزرگسال صحیح نیست.");
+      return true;
     }
 
-    await saveSession(chatId,"RAILCALC_ADULTS",{
-      route,
-      trainId:train.id,
-      trainName:train.name,
-      berthType:train.berthType,
-      trainPrice:train.price,
-      departure:train.departure,
-      arrival:train.arrival
+    await saveSession(chatId,"MAN_CHILDREN",{...d,adults:v});
+    await sendMessage(chatId,"👶 تعداد کودک را وارد کنید:");
+    return true;
+  }
+
+  if(s.state==="MAN_CHILDREN"){
+    if(v<0){
+      await sendMessage(chatId,"❌ تعداد کودک صحیح نیست.");
+      return true;
+    }
+
+    await saveSession(chatId,"MAN_NIGHTS",{...d,children:v});
+    await sendMessage(chatId,"🌙 تعداد شب را وارد کنید:");
+    return true;
+  }
+
+  if(s.state==="MAN_NIGHTS"){
+    if(v<=0){
+      await sendMessage(chatId,"❌ تعداد شب صحیح نیست.");
+      return true;
+    }
+
+    await saveSession(chatId,"MAN_TICKET",{...d,nights:v});
+    await sendMessage(chatId,"🎫 هزینه بلیت/سفر هر بزرگسال را وارد کنید:");
+    return true;
+  }
+
+  if(s.state==="MAN_TICKET"){
+    if(v<0){
+      await sendMessage(chatId,"❌ مبلغ صحیح نیست.");
+      return true;
+    }
+
+    await saveSession(chatId,"MAN_HOTEL",{...d,ticketAdult:v});
+    await sendMessage(chatId,"🏨 قیمت هتل هر بزرگسال/شب را وارد کنید:");
+    return true;
+  }
+
+  if(s.state==="MAN_HOTEL"){
+    if(v<0){
+      await sendMessage(chatId,"❌ مبلغ صحیح نیست.");
+      return true;
+    }
+
+    await saveSession(chatId,"MAN_PROFIT",{...d,hotelAdult:v});
+    await sendMessage(chatId,"📈 سود هر نفر را وارد کنید:");
+    return true;
+  }
+
+  if(s.state==="MAN_PROFIT"){
+    if(v<0){
+      await sendMessage(chatId,"❌ سود صحیح نیست.");
+      return true;
+    }
+
+    const r=PRICING.calculateManualTour({
+      ...d,
+      manualProfit:v,
+      paymentType:"cash"
     });
 
+    await saveSession(chatId,"MAIN",{});
+
     await sendMessage(
       chatId,
-      `🚆 قطار انتخاب شد:
-${train.name}
-${train.berthType}
-💰 ${PRICING.formatMoney(train.price)} تومان
-🕐 ${train.departure} → ${train.arrival}
-
-👨 تعداد بزرگسال را وارد کنید:`
+      PRICING.formatManualCalculation(r),
+      managerCalcMenu()
     );
-    return;
+
+    return true;
   }
 
-  if(data.startsWith("RAILCALC_ROUTE_BACK:")){
-    if(!isAdmin(chatId))return;
-    await showRailTrainSelection(chatId,data.split(":")[1]);
-    return;
-  }
-  if(data==="RAILCALC_CASH"||data==="RAILCALC_LOAN"){if(!isAdmin(chatId))return;const ss=await getSession(chatId);try{const r=PRICING.calculateRailTour({...ss.data,paymentType:data==="RAILCALC_LOAN"?"loan":"cash"});await saveSession(chatId,"MAIN",{});await sendMessage(chatId,PRICING.formatRailCalculation(r),managerCalculationKeyboard());}catch(e){await sendMessage(chatId,"❌ خطا در محاسبه:\n"+e.message,managerCalculationKeyboard());}return;}
-  if(data==="ADMIN_RAIL_CALC"){if(!isAdmin(chatId))return;await startRailCalculation(chatId);return;}
-  if(data==="ADMIN_AIR_CALC"){if(!isAdmin(chatId))return;await startManualManagerCalc(chatId,"AIR");return;}
-  if(data==="ADMIN_BUS_CALC"){if(!isAdmin(chatId))return;await startManualManagerCalc(chatId,"BUS");return;}
-  if(data==="ADMIN_CARAVAN_BUS_CALC"){if(!isAdmin(chatId))return;await startManualManagerCalc(chatId,"CARAVAN_BUS");return;}
-  if(data==="ADMIN_CARAVAN_RAIL_CALC"){if(!isAdmin(chatId))return;await startManualManagerCalc(chatId,"CARAVAN_RAIL");return;}
-  if(data==="ADMIN_HOTEL_CALC"){if(!isAdmin(chatId))return;await startManualManagerCalc(chatId,"HOTEL");return;}
-  if(data==="ADMIN_DIAMOND_CALC"){if(!isAdmin(chatId))return;await startManualManagerCalc(chatId,"DIAMOND");return;}
-  if(data==="ADMIN_MANUAL_CASH"){if(!isAdmin(chatId))return;await finishManualManagerCalc(chatId,"cash");return;}
-  if(data==="ADMIN_MANUAL_LOAN"){if(!isAdmin(chatId))return;await finishManualManagerCalc(chatId,"loan");return;}
-  if(data==="ADMIN_CALC_EXIT"){if(!isAdmin(chatId))return;await saveSession(chatId,"MAIN",{});await sendMessage(chatId,"✅ از محاسبات مدیر خارج شدی.",mainKeyboard(chatId));return;}
+  return false;
+}
+async function handleMessage(message){
+  const chatId=getChatId(message);
+  if(!chatId)return;
 
-  /* تأیید مدیر */
+  let session=await getSession(chatId);
 
-  if (
-    data.startsWith(
-      "APPROVE_REQUEST:"
-    )
-  ) {
+  if(await handleMedia(message,session))return;
 
-    if (
-      !isAdmin(chatId)
-    ) {
-      return;
-    }
+  const text=String(message.text||"").trim();
 
-
-    const code =
-      data.split(":")[1];
-
-
-    await approveRequest(
+  if(text==="/start"){
+    await clearSession(chatId);
+    await saveSession(chatId,"MAIN",{});
+    await sendMessage(
       chatId,
-      code
+      "🌹 به ربات سفر مشهد توس خوش آمدید.\n\nبرای دریافت خدمات گزینه موردنظر را انتخاب کنید.",
+      mainKeyboard()
     );
-
     return;
   }
 
+  if(text==="🚌 تورهای مشهد"){
+    await saveSession(chatId,"TOUR_MENU",{});
+    await sendMessage(
+      chatId,
+      "🚌 تورهای مشهد\n\nنوع سفر را انتخاب کنید:",
+      tourMenu()
+    );
+    return;
+  }
 
-  /* رد درخواست */
+  if(text==="🏨 رزرو هتل"){
+    await sendMessage(
+      chatId,
+      "🏨 رزرو هتل فعلاً غیر فعال است.",
+      mainKeyboard()
+    );
+    return;
+  }
 
-  if (
-    data.startsWith(
-      "REJECT_REQUEST:"
-    )
-  ) {
+  if(text==="💎 طرح الماس شهر بهشت"){
+    await sendDiamondPlan(chatId);
+    return;
+  }
 
-    if (
-      !isAdmin(chatId)
-    ) {
+  if(text==="🧳 خدمات گردشگری"){
+    await sendMessage(
+      chatId,
+      "🧳 خدمات گردشگری\n\n✈️ تورهای هوایی\n🚆 تورهای ریلی\n🚌 تورهای اتوبوسی\n🚍 کاروان‌های زیارتی\n🏨 رزرو هتل — فعلاً غیرفعال\n\n☎️ "+CONFIG.CONTACT.phone,
+      mainKeyboard()
+    );
+    return;
+  }
+
+  if(text==="📞 تماس با ما"){
+    await sendMessage(
+      chatId,
+      `📞 تماس با ما\n\n👤 ${CONFIG.CONTACT.name}\n☎️ ${CONFIG.CONTACT.phone}\n${CONFIG.WEBSITE_URL}`,
+      mainKeyboard()
+    );
+    return;
+  }
+
+  if(text==="📢 کانال"){
+    await sendMessage(
+      chatId,
+      `📢 کانال سفر مشهد توس\n\n${CONFIG.CHANNEL_URL}`,
+      mainKeyboard()
+    );
+    return;
+  }
+
+  if(text==="🧮 محاسبات مدیر"&&isAdmin(chatId)){
+    await saveSession(chatId,"ADMIN_CALC",{});
+    await sendMessage(
+      chatId,
+      "🧮 محاسبات مدیر\n\nنوع محاسبه را انتخاب کنید:",
+      managerCalcMenu()
+    );
+    return;
+  }
+
+  if(text==="/railcalc"&&isAdmin(chatId)){
+    await startRailCalc(chatId);
+    return;
+  }
+
+  session=await getSession(chatId);
+
+  if(session?.state==="PASSENGER_LIST"&&text){
+    if(await handlePassengerText(chatId,text,session))return;
+  }
+
+  if(session&&isAdmin(chatId)){
+    if(await railText(chatId,text,session))return;
+    if(await manualText(chatId,text,session))return;
+  }
+
+  if(session&&text){
+    if(await handleTourText(chatId,text,session))return;
+  }
+
+  await sendMessage(
+    chatId,
+    "لطفاً یکی از گزینه‌های منو را انتخاب کنید.",
+    mainKeyboard()
+  );
+}
+
+async function handleCallback(cb){
+  const data=cb?.data||"";
+  const chatId=String(cb?.message?.chat?.id||"");
+
+  if(!chatId)return;
+
+  await answerCallback(cb.id);
+
+  if(data.startsWith("TOUR_")){
+    if(data==="TOUR_HOTEL"){
+      await sendMessage(chatId,"🏨 رزرو هتل فعلاً غیر فعال است.");
       return;
     }
 
+    if(data==="TOUR_PAYMENT_CASH"||data==="TOUR_PAYMENT_LOAN"){
+      const s=await getSession(chatId);
+      if(!s)return;
 
-    const code =
-      data.split(":")[1];
-
-
-    const result =
-      await pool.query(
-
-        `
-        SELECT *
-        FROM requests
-        WHERE request_code = $1
-        `,
-
-        [code]
-      );
-
-
-    if (
-      !result.rows.length
-    ) {
-
-      await sendMessage(
+      await askName(
         chatId,
-        "❌ درخواست پیدا نشد."
+        {
+          ...s.data,
+          paymentType:data==="TOUR_PAYMENT_LOAN"?"loan":"cash"
+        }
       );
-
       return;
     }
 
+    if(data==="TOUR_SUBMIT"){
+      await submitRequest(chatId);
+      return;
+    }
 
-    const request =
-      result.rows[0];
+    if(data==="TOUR_EDIT"){
+      const s=await getSession(chatId);
+      await startTour(chatId,s?.data?.tourType||"BUS");
+      return;
+    }
 
+    if(data==="TOUR_CANCEL"){
+      await clearSession(chatId);
+      await sendMessage(chatId,"❌ درخواست لغو شد.",mainKeyboard());
+      return;
+    }
 
-    await pool.query(
+    if(data==="TOUR_BACK"){
+      await goBack(chatId);
+      return;
+    }
 
-      `
-      UPDATE requests
-      SET
-        status = 'rejected',
-        updated_at = NOW()
-      WHERE request_code = $1
-      `,
+    const map={
+      TOUR_AIR:"AIR",
+      TOUR_RAIL:"RAIL",
+      TOUR_BUS:"BUS",
+      TOUR_CARAVAN_BUS:"CARAVAN_BUS",
+      TOUR_CARAVAN_RAIL:"CARAVAN_RAIL"
+    };
 
+    if(map[data]){
+      await startTour(chatId,map[data]);
+      return;
+    }
+  }
+
+  if(data==="BACK_MAIN"||data==="DIAMOND_BACK"){
+    await clearSession(chatId);
+    await sendMessage(chatId,"🏠 صفحه اصلی",mainKeyboard());
+    return;
+  }
+
+  if(data.startsWith("APPROVE_REQUEST:")){
+    await approveRequest(chatId,data.split(":")[1]);
+    return;
+  }
+
+  if(data.startsWith("REJECT_REQUEST:")){
+    await rejectRequest(chatId,data.split(":")[1]);
+    return;
+  }
+
+  if(data==="ADMIN_RAIL_CALC"&&isAdmin(chatId)){
+    await startRailCalc(chatId);
+    return;
+  }
+
+  if(data.startsWith("CALC_REQUEST:")&&isAdmin(chatId)){
+    const code=data.split(":")[1];
+
+    const rr=await pool.query(
+      "SELECT * FROM requests WHERE request_code=$1",
       [code]
     );
 
+    if(!rr.rows.length){
+      await sendMessage(chatId,"❌ درخواست پیدا نشد.");
+      return;
+    }
 
-    await sendMessage(
+    const rq=rr.rows[0];
+    const p=rq.payload||{};
+    const nationalCode=
+      p.nationalCode||
+      p.national_code||
+      rq.national_code||
+      "";
 
+    await startRailCalc(
       chatId,
-
-      `❌ درخواست ${code} رد شد.`
-    );
-
-
-    await sendMessage(
-
-      request.user_id,
-
-      "❌ درخواست شما توسط مدیر تأیید نشد.\n\n" +
-
-      `🆔 شماره درخواست: ${code}\n\n` +
-
-      `☎️ ${CONFIG.CONTACT.phone}`,
-
-      mainKeyboard(chatId)
+      {
+        requestCode:code,
+        applicantName:rq.applicant_name||"",
+        phone:rq.phone||"",
+        nationalCode,
+        adults:Number(p.adults||0),
+        children:Number(p.children||0),
+        nights:Number(p.nights||0),
+        paymentType:p.paymentType||rq.payment_type||"cash"
+      }
     );
 
     return;
   }
 
+  if(data.startsWith("RAIL_ROUTE:")&&isAdmin(chatId)){
+    const route=data.split(":")[1];
 
-  console.log(
-    "⚠️ Unknown callback:",
-    data
+    const trains=PRICING.getTrainsForRoute(route);
+
+    const rows=trains.map(
+      t=>[
+        {
+          text:`🚆 ${t.train} | ${t.stars} | ${money(t.ticket)} تومان`,
+          callback_data:`RAIL_TRAIN:${t.key}`
+        }
+      ]
+    );
+
+    rows.push([
+      {
+        text:"🔙 تغییر مسیر",
+        callback_data:"ADMIN_RAIL_CALC"
+      }
+    ]);
+
+    const ss=await getSession(chatId);
+
+    await saveSession(
+      chatId,
+      "RAIL_TRAIN",
+      {
+        ...(ss?.data||{}),
+        route
+      }
+    );
+
+    await sendMessage(
+      chatId,
+      "🚆 قطار موردنظر را انتخاب کنید:",
+      {inline_keyboard:rows}
+    );
+
+    return;
+  }
+
+  if(data.startsWith("RAIL_TRAIN:")&&isAdmin(chatId)){
+    const trainKey=data.split(":")[1];
+    const ss=await getSession(chatId);
+    const d=ss?.data||{};
+
+    const train=PRICING
+      .getTrainsForRoute(d.route||"AHVAZ")
+      .find(x=>x.key===trainKey);
+
+    if(!train){
+      await sendMessage(chatId,"❌ قطار پیدا نشد.");
+      return;
+    }
+
+    const preAdults=Number(d.adults||0);
+    const preNights=Number(d.nights||0);
+
+    await saveSession(
+      chatId,
+      preAdults>0&&preNights>0?"RAIL_HOTEL":"RAIL_ADULTS",
+      {
+        ...d,
+        trainKey
+      }
+    );
+
+    if(preAdults>0&&preNights>0){
+      await sendMessage(
+        chatId,
+        `✅ ${train.train} انتخاب شد.\n💰 قیمت بلیت: ${money(train.ticket)} تومان\n\n🏨 قیمت هتل هر نفر / هر شب را وارد کنید:`
+      );
+    }else{
+      await sendMessage(
+        chatId,
+        `✅ ${train.train} انتخاب شد.\n💰 قیمت بلیت: ${money(train.ticket)} تومان\n\n👨 تعداد بزرگسال را وارد کنید:`
+      );
+    }
+
+    return;
+  }
+
+  if((data==="RAIL_PAYMENT_CASH"||data==="RAIL_PAYMENT_LOAN")&&isAdmin(chatId)){
+    const ss=await getSession(chatId);
+    if(!ss)return;
+
+    const d=ss.data||{};
+
+    try{
+      const result=PRICING.calculateRailTour(
+        {
+          ...d,
+          paymentType:data==="RAIL_PAYMENT_LOAN"?"loan":"cash",
+          childHotelPercent:50,
+          childTicketPercent:60
+        }
+      );
+
+      await saveSession(chatId,"ADMIN_CALC",{});
+
+      let out=PRICING.formatRailCalculation(result);
+
+      if(d.requestCode){
+        out+=`
+
+🆔 درخواست: ${d.requestCode}
+👤 متقاضی: ${d.applicantName||""}
+🪪 کد ملی: ${d.nationalCode||"ثبت نشده"}`;
+      }
+
+      await sendMessage(
+        chatId,
+        out,
+        managerCalcMenu()
+      );
+
+    }catch(e){
+      await sendMessage(
+        chatId,
+        `❌ خطا در محاسبه: ${e.message}`
+      );
+    }
+
+    return;
+  }
+
+  if(data.startsWith("ADMIN_MANUAL_")&&isAdmin(chatId)){
+    const type=data.replace("ADMIN_MANUAL_","");
+
+    await saveSession(
+      chatId,
+      "MAN_ADULTS",
+      {type}
+    );
+
+    await sendMessage(
+      chatId,
+      `🧮 محاسبه دستی ${type}\n\n👨 تعداد بزرگسال:`
+    );
+
+    return;
+  }
+
+  if(data==="ADMIN_CALC_EXIT"&&isAdmin(chatId)){
+    await saveSession(chatId,"MAIN",{});
+    await sendMessage(
+      chatId,
+      "✅ خروج از محاسبات مدیر.",
+      mainKeyboard()
+    );
+    return;
+  }
+}
+
+async function goBack(chatId){
+  const s=await getSession(chatId);
+  const d=s?.data||{};
+  const state=s?.state;
+
+  if(state==="TOUR_DATE_OUT")
+    return startTour(chatId,d.tourType);
+
+  if(state==="TOUR_NIGHTS")
+    return askTourOut(chatId,d);
+
+  if(state==="TOUR_ADULTS")
+    return askNights(chatId,d);
+
+  if(state==="TOUR_CHILDREN")
+    return askAdults(chatId,d);
+
+  if(state==="TOUR_PAYMENT")
+    return askChildren(chatId,d);
+
+  if(state==="TOUR_NAME")
+    return askPayment(chatId,d);
+
+  if(state==="TOUR_PHONE")
+    return askName(chatId,d);
+
+  if(state==="TOUR_NATIONAL")
+    return askPhone(chatId,d);
+
+  await clearSession(chatId);
+  await sendMessage(
+    chatId,
+    "🏠 صفحه اصلی",
+    mainKeyboard()
   );
 }
 
-
-/* =========================================================
-   WEBHOOK
-========================================================= */
-
 app.post(
   "/webhook",
-
-  async (
-    req,
-    res
-  ) => {
-
-    /*
-     * پاسخ سریع به بله
-     */
-
+  async(req,res)=>{
     res.sendStatus(200);
 
+    try{
+      if(req.body?.message)
+        await handleMessage(req.body.message);
 
-    try {
+      if(req.body?.callback_query)
+        await handleCallback(req.body.callback_query);
 
-      const update =
-        req.body;
-
-
-      console.log(
-        "📩 Bale update:",
-        JSON.stringify(
-          update,
-          null,
-          2
-        )
-      );
-
-
-      if (
-        update.message
-      ) {
-
-        await handleMessage(
-          update.message
-        );
-      }
-
-
-      if (
-        update.callback_query
-      ) {
-
-        await handleCallback(
-          update.callback_query
-        );
-      }
-
-    } catch (error) {
-
-      console.error(
-        "❌ Webhook error:",
-        error
-      );
+    }catch(e){
+      console.error("❌ Webhook error:",e);
     }
   }
 );
 
-
-/* =========================================================
-   HEALTH CHECK
-========================================================= */
-
 app.get(
   "/",
-  (
-    req,
-    res
-  ) => {
+  (req,res)=>res.send("Safar Mashhad Toos Bot is running ✅")
+);
 
-    res.send(
-      "Safar Mashhad Toos Bot is running ✅"
-    );
-  });
-
-
-/* =========================================================
-   START
-========================================================= */
-
-async function startServer() {
-
-  try {
-
+(async()=>{
+  try{
     await initDB();
 
-
     app.listen(
-
       CONFIG.PORT,
-
-      () => {
-
-        console.log(
-          `🚀 Server running on port ${CONFIG.PORT}`
-        );
-
-        console.log(
-          `👤 ADMIN_CHAT_ID: ${CONFIG.ADMIN_CHAT_ID}`
-        );
-
-      }
-    );
-
-  } catch (error) {
-
-    console.error(
-      "❌ Startup error:",
-
-      error
-
-    );
-
-    process.exit(1);
-  }
-}
-
-
-startServer();
-/* =========================================================
-   ادامه CALLBACK اصلی
-========================================================= */
-
-  if(data==="ADMIN_CALC_MENU"){
-    if(!isAdmin(chatId)) return;
-
-    await showManagerCalculations(chatId);
-    return;
-  }
-
-
-  /* =========================================================
-     انتخاب مسیر ریلی
-  ========================================================= */
-
-  if(data.startsWith("RAILCALC_ROUTE:")){
-
-    if(!isAdmin(chatId)) return;
-
-    const route =
-      data.split(":")[1];
-
-    await showRailTrainSelection(
-      chatId,
-      route
-    );
-
-    return;
-  }
-
-
-  /* =========================================================
-     انتخاب قطار
-  ========================================================= */
-
-  if(data.startsWith("RAILCALC_TRAIN:")){
-
-    if(!isAdmin(chatId)) return;
-
-    const parts =
-      data.split(":");
-
-    const route =
-      parts[1];
-
-    const trainId =
-      parts.slice(2).join(":");
-
-    const train =
-      CONFIG.RAIL
-        ?.TICKET_PRICES
-        ?. [route]
-        ?.TRAINS
-        ?.find(
-          x =>
-            String(x.id) ===
-            String(trainId)
-        );
-
-
-    if(!train){
-
-      await sendMessage(
-        chatId,
-        "❌ قطار انتخاب‌شده پیدا نشد."
-      );
-
-      return;
-    }
-
-
-    await saveSession(
-
-      chatId,
-
-      "RAILCALC_ADULTS",
-
-      {
-        route,
-
-        trainId:
-          train.id,
-
-        trainName:
-          train.name,
-
-        berthType:
-          train.berthType,
-
-        trainPrice:
-          train.price,
-
-        departure:
-          train.departure,
-
-        arrival:
-          train.arrival
-      }
-    );
-
-
-    await sendMessage(
-
-      chatId,
-
-      `🚆 قطار انتخاب شد:
-
-${train.name}
-
-${train.berthType}
-
-💰 ${PRICING.formatMoney(train.price)} تومان
-
-🕐 ${train.departure} → ${train.arrival}
-
-
-👨 تعداد بزرگسال را وارد کنید:`
-    );
-
-    return;
-  }
-
-
-  /* =========================================================
-     برگشت به انتخاب قطار
-  ========================================================= */
-
-  if(
-    data.startsWith(
-      "RAILCALC_ROUTE_BACK:"
-    )
-  ){
-
-    if(!isAdmin(chatId)) return;
-
-    await showRailTrainSelection(
-      chatId,
-      data.split(":")[1]
-    );
-
-    return;
-  }
-
-
-  /* =========================================================
-     پرداخت ریلی
-  ========================================================= */
-
-  if(
-    data === "RAILCALC_CASH" ||
-    data === "RAILCALC_LOAN"
-  ){
-
-    if(!isAdmin(chatId)) return;
-
-    const ss =
-      await getSession(chatId);
-
-    try{
-
-      const result =
-        PRICING.calculateRailTour({
-
-          ...ss.data,
-
-          paymentType:
-            data === "RAILCALC_LOAN"
-              ? "loan"
-              : "cash"
-
-        });
-
-
-      await saveSession(
-        chatId,
-        "MAIN",
-        {}
-      );
-
-
-      await sendMessage(
-
-        chatId,
-
-        PRICING.formatRailCalculation(
-          result
-        ),
-
-        managerCalculationKeyboard()
-      );
-
-
-    }catch(error){
-
-      await sendMessage(
-
-        chatId,
-
-        "❌ خطا در محاسبه:\n" +
-        error.message,
-
-        managerCalculationKeyboard()
-      );
-    }
-
-    return;
-  }
-
-
-  /* =========================================================
-     شروع محاسبه ریلی
-  ========================================================= */
-
-  if(
-    data === "ADMIN_RAIL_CALC"
-  ){
-
-    if(!isAdmin(chatId)) return;
-
-    await startRailCalculation(
-      chatId
-    );
-
-    return;
-  }
-
-
-  /* =========================================================
-     محاسبه هوایی
-  ========================================================= */
-
-  if(
-    data === "ADMIN_AIR_CALC"
-  ){
-
-    if(!isAdmin(chatId)) return;
-
-    await startManualManagerCalc(
-      chatId,
-      "AIR"
-    );
-
-    return;
-  }
-
-
-  /* =========================================================
-     محاسبه اتوبوسی
-  ========================================================= */
-
-  if(
-    data === "ADMIN_BUS_CALC"
-  ){
-
-    if(!isAdmin(chatId)) return;
-
-    await startManualManagerCalc(
-      chatId,
-      "BUS"
-    );
-
-    return;
-  }
-
-
-  /* =========================================================
-     محاسبه کاروان اتوبوسی
-  ========================================================= */
-
-  if(
-    data ===
-      "ADMIN_CARAVAN_BUS_CALC"
-  ){
-
-    if(!isAdmin(chatId)) return;
-
-    await startManualManagerCalc(
-      chatId,
-      "CARAVAN_BUS"
-    );
-
-    return;
-  }
-
-
-  /* =========================================================
-     محاسبه کاروان ریلی
-  ========================================================= */
-
-  if(
-    data ===
-      "ADMIN_CARAVAN_RAIL_CALC"
-  ){
-
-    if(!isAdmin(chatId)) return;
-
-    await startManualManagerCalc(
-      chatId,
-      "CARAVAN_RAIL"
-    );
-
-    return;
-  }
-
-
-  /* =========================================================
-     محاسبه هتل
-  ========================================================= */
-
-  if(
-    data ===
-      "ADMIN_HOTEL_CALC"
-  ){
-
-    if(!isAdmin(chatId)) return;
-
-    await startManualManagerCalc(
-      chatId,
-      "HOTEL"
-    );
-
-    return;
-  }
-
-
-  /* =========================================================
-     محاسبه طرح الماس
-  ========================================================= */
-
-  if(
-    data ===
-      "ADMIN_DIAMOND_CALC"
-  ){
-
-    if(!isAdmin(chatId)) return;
-
-    await startManualManagerCalc(
-      chatId,
-      "DIAMOND"
-    );
-
-    return;
-  }
-
-
-  /* =========================================================
-     پرداخت نقدی محاسبات دستی
-  ========================================================= */
-
-  if(
-    data ===
-      "ADMIN_MANUAL_CASH"
-  ){
-
-    if(!isAdmin(chatId)) return;
-
-    await finishManualManagerCalc(
-      chatId,
-      "cash"
-    );
-
-    return;
-  }
-
-
-  /* =========================================================
-     پرداخت طرح الماس محاسبات دستی
-  ========================================================= */
-
-  if(
-    data ===
-      "ADMIN_MANUAL_LOAN"
-  ){
-
-    if(!isAdmin(chatId)) return;
-
-    await finishManualManagerCalc(
-      chatId,
-      "loan"
-    );
-
-    return;
-  }
-
-
-  /* =========================================================
-     خروج از محاسبات
-  ========================================================= */
-
-  if(
-    data ===
-      "ADMIN_CALC_EXIT"
-  ){
-
-    if(!isAdmin(chatId)) return;
-
-    await saveSession(
-      chatId,
-      "MAIN",
-      {}
-    );
-
-
-    await sendMessage(
-
-      chatId,
-
-      "✅ از محاسبات مدیر خارج شدی.",
-
-      mainKeyboard(chatId)
-    );
-
-    return;
-  }
-
-
-  /* =========================================================
-     تأیید درخواست توسط مدیر
-  ========================================================= */
-
-  if(
-    data.startsWith(
-      "APPROVE_REQUEST:"
-    )
-  ){
-
-    if(
-      !isAdmin(chatId)
-    ){
-      return;
-    }
-
-
-    const code =
-      data.split(":")[1];
-
-
-    await approveRequest(
-      chatId,
-      code
-    );
-
-    return;
-  }
-
-
-  /* =========================================================
-     رد درخواست توسط مدیر
-  ========================================================= */
-
-  if(
-    data.startsWith(
-      "REJECT_REQUEST:"
-    )
-  ){
-
-    if(
-      !isAdmin(chatId)
-    ){
-      return;
-    }
-
-
-    const code =
-      data.split(":")[1];
-
-
-    const result =
-      await pool.query(
-
-        `
-        SELECT *
-        FROM requests
-        WHERE request_code = $1
-        `,
-
-        [code]
-      );
-
-
-    if(
-      !result.rows.length
-    ){
-
-      await sendMessage(
-        chatId,
-        "❌ درخواست پیدا نشد."
-      );
-
-      return;
-    }
-
-
-    const request =
-      result.rows[0];
-
-
-    await pool.query(
-
-      `
-      UPDATE requests
-
-      SET
-        status = 'rejected',
-        updated_at = NOW()
-
-      WHERE request_code = $1
-      `,
-
-      [code]
-    );
-
-
-    await sendMessage(
-
-      chatId,
-
-      `❌ درخواست ${code} رد شد.`
-    );
-
-
-    await sendMessage(
-
-      request.user_id,
-
-      "❌ درخواست شما توسط مدیر تأیید نشد.\n\n" +
-
-      `🆔 شماره درخواست: ${code}\n\n` +
-
-      `☎️ ${CONFIG.CONTACT.phone}`,
-
-      mainKeyboard(
-        request.user_id
+      "0.0.0.0",
+      ()=>console.log(
+        `🚀 Server running on port ${CONFIG.PORT}`
       )
     );
 
-    return;
-  }
-
-
-  console.log(
-    "⚠️ Unknown callback:",
-    data
-  );
-}
-
-
-/* =========================================================
-   WEBHOOK
-========================================================= */
-
-app.post(
-  "/webhook",
-
-  async (
-    req,
-    res
-  ) => {
-
-    /*
-     * پاسخ سریع به بله
-     */
-
-    res.sendStatus(200);
-
-
-    try {
-
-      const update =
-        req.body;
-
-
-      console.log(
-        "📩 Bale update:",
-        JSON.stringify(
-          update,
-          null,
-          2
-        )
-      );
-
-
-      /* پیام معمولی */
-
-      if(
-        update.message
-      ){
-
-        await handleMessage(
-          update.message
-        );
-      }
-
-
-      /* کلیک روی دکمه */
-
-      if(
-        update.callback_query
-      ){
-
-        await handleCallback(
-          update.callback_query
-        );
-      }
-
-
-    }catch(error){
-
-      console.error(
-        "❌ Webhook error:",
-        error
-      );
-    }
-
-  }
-);
-
-
-/* =========================================================
-   HEALTH CHECK
-========================================================= */
-
-app.get(
-  "/",
-
-  (
-    req,
-    res
-  ) => {
-
-    res.send(
-      "Safar Mashhad Toos Bot is running ✅"
-    );
-
-  }
-);
-
-
-/* =========================================================
-   START SERVER
-========================================================= */
-
-async function startServer(){
-
-  try{
-
-    await initDB();
-
-
-    app.listen(
-
-      CONFIG.PORT,
-
-      () => {
-
-        console.log(
-          `🚀 Server running on port ${CONFIG.PORT}`
-        );
-
-
-        console.log(
-          `👤 ADMIN_CHAT_ID: ${CONFIG.ADMIN_CHAT_ID}`
-        );
-
-      }
-
-    );
-
-  }catch(error){
-
-    console.error(
-      "❌ Startup error:",
-      error
-    );
-
-
+  }catch(e){
+    console.error("❌ Startup error:",e);
     process.exit(1);
   }
-
-}
-
-
-startServer();
+})();

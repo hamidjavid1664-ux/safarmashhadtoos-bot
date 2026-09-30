@@ -22,8 +22,63 @@ const CONFIG = {
   // آدرس ربات
   BOT_USERNAME: "@safarmashhadtoos_bot",
 
-  // آدرس سایت در صورت نیاز در آینده
-  WEBSITE_URL: "https://safarmashhadtoos.ir"
+  // آدرس سایت
+  WEBSITE_URL: "https://safarmashhadtoos.ir",
+
+  // ======================================
+  // تنظیمات محاسبه تور ریلی
+  // ======================================
+
+  RAIL: {
+
+    // هزینه صدور بلیت
+    TICKET_ISSUE_FEE: 0,
+
+    // درصد قیمت بلیت کودک
+    CHILD_TICKET_PERCENT: 50,
+
+    // ====================================
+    // قیمت بلیت‌های ریلی
+    // ====================================
+
+    TICKET_PRICES: {
+
+      AHVAZ_MASHHAD: {
+
+        name: "اهواز → مشهد",
+
+        FOUR_BERTH: {
+          name: "امید",
+          company: "رجا",
+          stars: 4,
+          price: 2010000
+        },
+
+        SIX_BERTH: {
+          name: "مهدیس",
+          company: "مهتاب سیر جم",
+          stars: 3,
+          price: 1940000
+        }
+
+      },
+
+      SHIRAZ_MASHHAD: {
+
+        name: "شیراز → مشهد",
+
+        FOUR_BERTH: {
+          name: "سرير",
+          company: "رجا",
+          stars: 4,
+          price: 2010000
+        }
+
+      }
+
+    }
+
+  }
 
 };
 

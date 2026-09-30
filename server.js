@@ -34,8 +34,12 @@ function isAdmin(chatId) {
 
 function en(v) {
   return String(v ?? "")
-    .replace(/[۰-۹]/g, d => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
-    .replace(/[٠-٩]/g, d => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+    .replace(/[۰-۹]/g, d =>
+      String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))
+    )
+    .replace(/[٠-٩]/g, d =>
+      String("٠١٢٣٤٥٦٧٨٩".indexOf(d))
+    );
 }
 
 function fa(v) {
@@ -151,6 +155,7 @@ function todayJalali() {
   const gd = d.getUTCDate();
 
   let gDay = Date.UTC(gy, gm - 1, gd) / 86400000;
+
   let jy = gy - 621;
 
   while (
@@ -210,8 +215,8 @@ async function initDB() {
       c === "payload"
         ? "JSONB DEFAULT '{}'::jsonb"
         : c === "status"
-          ? "TEXT DEFAULT 'pending'"
-          : "TEXT";
+        ? "TEXT DEFAULT 'pending'"
+        : "TEXT";
 
     await pool.query(
       `ALTER TABLE requests ADD COLUMN IF NOT EXISTS ${c} ${type}`
@@ -497,9 +502,7 @@ async function startTour(chatId, type) {
   await saveSession(
     chatId,
     "TOUR_DATE_IN",
-    {
-      tourType: type
-    }
+    { tourType: type }
   );
 
   await sendMessage(
@@ -890,7 +893,9 @@ async function submitRequest(chatId) {
   if (!s) return;
 
   const d = s.data || {};
+
   const code = requestCode();
+
   const info = d.messageInfo || {};
 
   const nationalCode =
@@ -1015,6 +1020,7 @@ async function approveRequest(adminId, code) {
   }
 
   const req = r.rows[0];
+
   const payload = req.payload || {};
 
   await pool.query(
@@ -1180,9 +1186,14 @@ ${line}
     }
 
     const nc = en(p[1]).replace(/\D/g, "");
+
     const bd = normalizeDate(p[2]);
 
-    if (!p[0] || !validNational(nc) || !bd) {
+    if (
+      !p[0] ||
+      !validNational(nc) ||
+      !bd
+    ) {
       await sendMessage(
         chatId,
         `❌ اطلاعات این خط صحیح نیست:
@@ -1207,12 +1218,12 @@ ${line}`
 📱 ${session.data.phone}
 
 ` +
-    good
-      .map(
-        (x, i) =>
-          `${i + 1}. ${x.name} | ${x.nationalCode} | ${x.birthDate}`
-      )
-      .join("\n")
+      good
+        .map(
+          (x, i) =>
+            `${i + 1}. ${x.name} | ${x.nationalCode} | ${x.birthDate}`
+        )
+        .join("\n")
   );
 
   await pool.query(
@@ -1244,7 +1255,9 @@ async function handleMedia(message, session) {
     session?.state === "PAYMENT_RECEIPT"
   ) {
     const photo =
-      message.photo[message.photo.length - 1];
+      message.photo[
+        message.photo.length - 1
+      ];
 
     await sendPhoto(
       CONFIG.ADMIN_CHAT_ID,
@@ -1288,7 +1301,9 @@ async function handleMedia(message, session) {
     session?.state === "PASSENGER_LIST"
   ) {
     const p =
-      message.photo[message.photo.length - 1];
+      message.photo[
+        message.photo.length - 1
+      ];
 
     await sendPhoto(
       CONFIG.ADMIN_CHAT_ID,
@@ -1721,7 +1736,7 @@ async function manualText(
 
     await saveSession(
       chatId,
-      "MAIN",
+      "ADMIN_CALC",
       {}
     );
 
@@ -1805,7 +1820,7 @@ async function handleMessage(message) {
     await sendMessage(
       chatId,
       "🧳 خدمات گردشگری\n\n✈️ تورهای هوایی\n🚆 تورهای ریلی\n🚌 تورهای اتوبوسی\n🚍 کاروان‌های زیارتی\n🏨 رزرو هتل — فعلاً غیرفعال\n\n☎️ " +
-      CONFIG.CONTACT.phone,
+        CONFIG.CONTACT.phone,
       mainKeyboard()
     );
 
@@ -1815,11 +1830,7 @@ async function handleMessage(message) {
   if (text === "📞 تماس با ما") {
     await sendMessage(
       chatId,
-      `📞 تماس با ما
-
-👤 ${CONFIG.CONTACT.name}
-☎️ ${CONFIG.CONTACT.phone}
-${CONFIG.WEBSITE_URL}`,
+      `📞 تماس با ما\n\n👤 ${CONFIG.CONTACT.name}\n☎️ ${CONFIG.CONTACT.phone}\n${CONFIG.WEBSITE_URL}`,
       mainKeyboard()
     );
 
@@ -1829,9 +1840,7 @@ ${CONFIG.WEBSITE_URL}`,
   if (text === "📢 کانال") {
     await sendMessage(
       chatId,
-      `📢 کانال سفر مشهد توس
-
-${CONFIG.CHANNEL_URL}`,
+      `📢 کانال سفر مشهد توس\n\n${CONFIG.CHANNEL_URL}`,
       mainKeyboard()
     );
 
@@ -1943,7 +1952,6 @@ async function handleCallback(cb) {
         chatId,
         "🏨 رزرو هتل فعلاً غیر فعال است."
       );
-
       return;
     }
 
@@ -1975,7 +1983,8 @@ async function handleCallback(cb) {
     }
 
     if (data === "TOUR_EDIT") {
-      const s = await getSession(chatId);
+      const s =
+        await getSession(chatId);
 
       await startTour(
         chatId,
@@ -2015,7 +2024,6 @@ async function handleCallback(cb) {
         chatId,
         map[data]
       );
-
       return;
     }
   }
@@ -2035,7 +2043,9 @@ async function handleCallback(cb) {
     return;
   }
 
-  if (data.startsWith("APPROVE_REQUEST:")) {
+  if (
+    data.startsWith("APPROVE_REQUEST:")
+  ) {
     await approveRequest(
       chatId,
       data.split(":")[1]
@@ -2044,7 +2054,9 @@ async function handleCallback(cb) {
     return;
   }
 
-  if (data.startsWith("REJECT_REQUEST:")) {
+  if (
+    data.startsWith("REJECT_REQUEST:")
+  ) {
     await rejectRequest(
       chatId,
       data.split(":")[1]
@@ -2083,6 +2095,7 @@ async function handleCallback(cb) {
     }
 
     const rq = rr.rows[0];
+
     const p = rq.payload || {};
 
     const nationalCode =
@@ -2116,6 +2129,12 @@ async function handleCallback(cb) {
     return;
   }
 
+  /*
+   * ==========================================
+   * انتخاب مسیر قطار
+   * ==========================================
+   */
+
   if (
     data.startsWith("RAIL_ROUTE:") &&
     isAdmin(chatId)
@@ -2126,16 +2145,14 @@ async function handleCallback(cb) {
     const trains =
       PRICING.getTrainsForRoute(route);
 
-    const rows = trains.map(
-      t => [
-        {
-          text:
-            `🚆 ${t.train} | ${t.stars} | ${money(t.ticket)} تومان`,
-          callback_data:
-            `RAIL_TRAIN:${t.key}`
-        }
-      ]
-    );
+    const rows = trains.map(t => [
+      {
+        text:
+          `🚆 ${t.train} | ${t.stars} | ${t.berth || ""} | ${money(t.ticket)} تومان`,
+        callback_data:
+          `RAIL_TRAIN:${t.key}`
+      }
+    ]);
 
     rows.push([
       {
@@ -2171,16 +2188,10 @@ async function handleCallback(cb) {
   /*
    * ==========================================
    * انتخاب قطار
+   *
+   * بعد از انتخاب قطار، حتماً انتخاب
+   * اجاره یا عدم اجاره کوپه نمایش داده می‌شود.
    * ==========================================
-   *
-   * بعد از انتخاب قطار، ابتدا انتخاب می‌کنیم:
-   *
-   * 🚫 بدون اجاره کوپه
-   * 🚆 اجاره کوپه ۴ تخته
-   * 🚆 اجاره کوپه ۶ تخته
-   *
-   * البته گزینه اجاره دقیقاً بر اساس نوع
-   * کوپه همان قطار نمایش داده می‌شود.
    */
 
   if (
@@ -2193,8 +2204,7 @@ async function handleCallback(cb) {
     const ss =
       await getSession(chatId);
 
-    const d =
-      ss?.data || {};
+    const d = ss?.data || {};
 
     const train =
       PRICING
@@ -2214,6 +2224,10 @@ async function handleCallback(cb) {
       return;
     }
 
+    /*
+     * انتخاب قطار را ذخیره می‌کنیم
+     * ولی هنوز محاسبه انجام نمی‌شود.
+     */
     await saveSession(
       chatId,
       "RAIL_BERTH",
@@ -2223,25 +2237,23 @@ async function handleCallback(cb) {
       }
     );
 
-    const berthText =
-      String(
-        train.berth || ""
-      ).trim();
+    const berth =
+      train.berth || "";
 
     await sendMessage(
       chatId,
       `✅ ${train.train} انتخاب شد.
 
+⭐ درجه: ${train.stars}
+🚆 نوع کوپه: ${berth}
 💰 قیمت بلیت یک‌طرفه: ${money(train.ticket)} تومان
-🛏 نوع کوپه قطار: ${berthText}
 
-لطفاً وضعیت اجاره کوپه را انتخاب کنید:`,
+🚆 وضعیت اجاره کوپه را انتخاب کنید:`,
       {
         inline_keyboard: [
           [
             {
-              text:
-                "🚫 بدون اجاره کوپه",
+              text: "🚫 بدون اجاره کوپه",
               callback_data:
                 "RAIL_BERTH_NONE"
             }
@@ -2249,15 +2261,14 @@ async function handleCallback(cb) {
           [
             {
               text:
-                `🚆 اجاره کوپه ${berthText}`,
+                `🚆 اجاره کوپه ${berth}`,
               callback_data:
                 "RAIL_BERTH_RENT"
             }
           ],
           [
             {
-              text:
-                "🔙 تغییر قطار",
+              text: "🔙 تغییر قطار",
               callback_data:
                 `RAIL_ROUTE:${d.route || "AHVAZ"}`
             }
@@ -2271,7 +2282,7 @@ async function handleCallback(cb) {
 
   /*
    * ==========================================
-   * انتخاب اجاره یا بدون اجاره کوپه
+   * انتخاب بدون اجاره / اجاره کوپه
    * ==========================================
    */
 
@@ -2302,64 +2313,79 @@ async function handleCallback(cb) {
     if (!train) {
       await sendMessage(
         chatId,
-        "❌ اطلاعات قطار پیدا نشد."
+        "❌ قطار انتخاب‌شده پیدا نشد."
       );
 
       return;
     }
 
+    /*
+     * اگر بدون اجاره باشد:
+     * berthOption = بدون اجاره
+     *
+     * اگر اجاره باشد:
+     * ظرفیت همان قطار ذخیره می‌شود.
+     */
     const berthOption =
       data === "RAIL_BERTH_RENT"
-        ? `اجاره کوپه ${train.berth}`
-        : "بدون اجاره کوپه";
+        ? (
+            train.berth ||
+            "6 تخته"
+          )
+        : "بدون اجاره";
 
-    const berthValue =
-      data === "RAIL_BERTH_RENT"
-        ? train.berth
-        : "none";
+    const berthText =
+      berthOption === "بدون اجاره"
+        ? "🚫 بدون اجاره کوپه"
+        : `🚆 اجاره ${berthOption}`;
 
     /*
-     * اگر درخواست مشتری از قبل تعداد بزرگسال
-     * و شب اقامت داشته باشد، آنها حفظ می‌شوند.
+     * اگر درخواست مشتری قبلاً
+     * تعداد بزرگسال و شب را دارد،
+     * همان‌ها حفظ می‌شوند.
      */
     const preAdults =
       Number(d.adults || 0);
 
+    const preNights =
+      Number(d.nights || 0);
+
+    /*
+     * انتخاب کوپه را داخل Session ذخیره می‌کنیم.
+     */
+    const nextState =
+      preAdults > 0 &&
+      preNights > 0
+        ? "RAIL_HOTEL"
+        : "RAIL_ADULTS";
+
     await saveSession(
       chatId,
-      "RAIL_ADULTS",
+      nextState,
       {
         ...d,
-        berthOption,
-        berthValue
+        trainKey,
+        berthOption
       }
     );
 
-    if (preAdults > 0) {
-      await saveSession(
-        chatId,
-        "RAIL_CHILDREN",
-        {
-          ...d,
-          berthOption,
-          berthValue,
-          adults: preAdults
-        }
-      );
-
+    if (
+      preAdults > 0 &&
+      preNights > 0
+    ) {
       await sendMessage(
         chatId,
-        `✅ ${berthOption} انتخاب شد.
+        `${berthText}
 
-👨 تعداد بزرگسال: ${preAdults} نفر
+👨 تعداد بزرگسال: ${preAdults}
+🌙 تعداد شب: ${preNights}
 
-👶 تعداد کودک ۲ تا ۱۲ سال را وارد کنید.
-اگر کودک ندارید ۰ بفرستید:`
+🏨 قیمت هتل هر نفر / هر شب را وارد کنید:`
       );
     } else {
       await sendMessage(
         chatId,
-        `✅ ${berthOption} انتخاب شد.
+        `${berthText}
 
 👨 تعداد بزرگسال را وارد کنید:`
       );
@@ -2370,7 +2396,7 @@ async function handleCallback(cb) {
 
   /*
    * ==========================================
-   * پرداخت محاسبه ریلی
+   * پرداخت و محاسبه نهایی
    * ==========================================
    */
 
@@ -2390,15 +2416,29 @@ async function handleCallback(cb) {
       ss.data || {};
 
     try {
+      /*
+       * berthOption اینجا حتماً از Session
+       * به pricing.js فرستاده می‌شود.
+       */
       const result =
         PRICING.calculateRailTour({
           ...d,
+
           paymentType:
             data === "RAIL_PAYMENT_LOAN"
               ? "loan"
               : "cash",
+
           childHotelPercent: 50,
-          childTicketPercent: 60
+          childTicketPercent: 60,
+
+          /*
+           * اگر به هر دلیلی مقدار خالی بود،
+           * محاسبه بدون اجاره انجام شود.
+           */
+          berthOption:
+            d.berthOption ||
+            "بدون اجاره"
         });
 
       await saveSession(
@@ -2417,6 +2457,7 @@ async function handleCallback(cb) {
 
 🆔 درخواست: ${d.requestCode}
 👤 متقاضی: ${d.applicantName || ""}
+📱 تلفن: ${d.phone || ""}
 🪪 کد ملی: ${d.nationalCode || "ثبت نشده"}`;
       }
 
@@ -2427,14 +2468,26 @@ async function handleCallback(cb) {
       );
 
     } catch (e) {
+      console.error(
+        "Rail calculation error:",
+        e
+      );
+
       await sendMessage(
         chatId,
-        `❌ خطا در محاسبه: ${e.message}`
+        `❌ خطا در محاسبه:
+${e.message}`
       );
     }
 
     return;
   }
+
+  /*
+   * ==========================================
+   * محاسبات دستی
+   * ==========================================
+   */
 
   if (
     data.startsWith("ADMIN_MANUAL_") &&
@@ -2449,9 +2502,7 @@ async function handleCallback(cb) {
     await saveSession(
       chatId,
       "MAN_ADULTS",
-      {
-        type
-      }
+      { type }
     );
 
     await sendMessage(
@@ -2463,6 +2514,12 @@ async function handleCallback(cb) {
 
     return;
   }
+
+  /*
+   * ==========================================
+   * خروج
+   * ==========================================
+   */
 
   if (
     data === "ADMIN_CALC_EXIT" &&
@@ -2587,7 +2644,9 @@ app.post(
         );
       }
 
-      if (req.body?.callback_query) {
+      if (
+        req.body?.callback_query
+      ) {
         await handleCallback(
           req.body.callback_query
         );

@@ -1,6 +1,15 @@
 const CONFIG = require("./config");
 
 // ======================================================
+// تنظیمات اصلی محاسبه
+// ======================================================
+
+const TICKET_ISSUE_FEE = 200000; // هزینه صدور بلیت برای هر مسیر
+const EMPTY_BERTH_PRICE = 800000; // هزینه هر تخت خالی
+const CASH_PROFIT_PER_PERSON = 3000000;
+const LOAN_PROFIT_PER_PERSON = 5000000;
+
+// ======================================================
 // قیمت و اطلاعات قطارها
 // ======================================================
 
@@ -142,6 +151,113 @@ function getTicketPrice(route, type, trainKey) {
 }
 
 // ======================================================
+// تشخیص ظرفیت کوپه
+// ======================================================
+
+function getBerthCapacity(value, train = null) {
+
+  const v = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  // بدون اجاره کوپه
+  if (
+    v === "none" ||
+    v === "no" ||
+    v === "false" ||
+    v === "0" ||
+    v === "بدون اجاره" ||
+    v === "بدون اجاره کوپه" ||
+    v === "عدم اجاره"
+  ) {
+    return 0;
+  }
+
+  // کوپه ۴ تخته
+  if (
+    v === "4" ||
+    v === "4_berth" ||
+    v === "berth4" ||
+    v === "چهار تخته" ||
+    v === "۴ تخته" ||
+    v === "کوپه ۴ تخته"
+  ) {
+    return 4;
+  }
+
+  // کوپه ۶ تخته
+  if (
+    v === "6" ||
+    v === "6_berth" ||
+    v === "berth6" ||
+    v === "شش تخته" ||
+    v === "۶ تخته" ||
+    v === "کوپه ۶ تخته"
+  ) {
+    return 6;
+  }
+
+  // اگر انتخاب جداگانه انجام نشده باشد،
+  // فعلاً هیچ هزینه تخت خالی اضافه نمی‌کنیم.
+  return 0;
+}
+
+// ======================================================
+// محاسبه تخت‌های خالی
+//
+// فقط وقتی کوپه اجاره شده باشد.
+//
+// مثال:
+// ۴ نفر در کوپه ۶ تخته
+// ۲ تخت خالی
+// ۲ × ۸۰۰,۰۰۰ = ۱,۶۰۰,۰۰۰
+// این مبلغ بین ۴ نفر تقسیم می‌شود.
+// ======================================================
+
+function calculateEmptyBerths(totalPassengers, berthCapacity) {
+
+  const passengers = numberValue(totalPassengers);
+  const capacity = numberValue(berthCapacity);
+
+  if (passengers <= 0 || capacity <= 0) {
+    return {
+      berthCapacity: capacity,
+      compartmentsNeeded: 0,
+      totalBerths: 0,
+      emptyBerths: 0,
+      emptyBerthTotal: 0,
+      emptyBerthPerPerson: 0
+    };
+  }
+
+  const compartmentsNeeded =
+    Math.ceil(passengers / capacity);
+
+  const totalBerths =
+    compartmentsNeeded * capacity;
+
+  const emptyBerths =
+    Math.max(0, totalBerths - passengers);
+
+  const emptyBerthTotal =
+    emptyBerths * EMPTY_BERTH_PRICE;
+
+  const emptyBerthPerPerson =
+    passengers > 0
+      ? Math.round(emptyBerthTotal / passengers)
+      : 0;
+
+  return {
+    berthCapacity: capacity,
+    compartmentsNeeded,
+    totalBerths,
+    emptyBerths,
+    emptyBerthTotal,
+    emptyBerthPerPerson
+  };
+}
+
+// ======================================================
 // گرد کردن مبلغ وام
 //
 // مثال:
@@ -152,6 +268,7 @@ function getTicketPrice(route, type, trainKey) {
 // ======================================================
 
 function roundLoanAmount(amount) {
+
   const n = numberValue(amount);
 
   return Math.round(n / 5000000) * 5000000;
@@ -159,145 +276,276 @@ function roundLoanAmount(amount) {
 
 // ======================================================
 // محاسبه تور ریلی
-//
-// نقدی:
-// سود هر نفر = 3,000,000
-//
-// طرح الماس:
-// سود هر نفر = 5,000,000
-//
-// مشتری در طرح الماس:
-// 40 درصد نقد
-// 60 درصد وام
 // ======================================================
 
 function calculateRailTour(data = {}) {
 
-  const route = String(data.route || "").toUpperCase();
-  const trainKey = data.trainKey || data.trainId || "";
+  const route =
+    String(data.route || "").toUpperCase();
 
-  const train = getSelectedTrain(route, trainKey);
+  const trainKey =
+    data.trainKey ||
+    data.trainId ||
+    "";
+
+  const train =
+    getSelectedTrain(route, trainKey);
 
   if (!train) {
     throw new Error("قطار انتخاب نشده است.");
   }
 
-  const adults = numberValue(data.adults);
-  const children = numberValue(data.children);
-  const nights = numberValue(data.nights);
+  // --------------------------------------------------
+  // تعداد مسافر
+  // --------------------------------------------------
 
-  const hotelPrice = numberValue(
-    data.hotelPricePerPersonPerNight ||
-    data.hotelPrice ||
-    data.hotelAdult ||
-    0
-  );
+  const adults =
+    numberValue(data.adults);
+
+  const children =
+    numberValue(data.children);
+
+  const totalPassengers =
+    adults + children;
 
   if (adults <= 0) {
     throw new Error("تعداد بزرگسال وارد نشده است.");
   }
 
+  if (totalPassengers <= 0) {
+    throw new Error("تعداد مسافران وارد نشده است.");
+  }
+
+  // --------------------------------------------------
+  // تعداد شب
+  // --------------------------------------------------
+
+  const nights =
+    numberValue(data.nights);
+
   if (nights <= 0) {
     throw new Error("تعداد شب اقامت وارد نشده است.");
   }
+
+  // --------------------------------------------------
+  // قیمت هتل
+  // --------------------------------------------------
+
+  const hotelPrice =
+    numberValue(
+      data.hotelPricePerPersonPerNight ||
+      data.hotelPrice ||
+      data.hotelAdult ||
+      0
+    );
 
   if (hotelPrice <= 0) {
     throw new Error("قیمت هتل وارد نشده است.");
   }
 
-  // --------------------------------------------------
+  // ==================================================
   // بلیت
-  // --------------------------------------------------
+  //
+  // فرمول:
+  //
+  // (قیمت بلیت + ۲۰۰ هزار صدور) × ۲
+  //
+  // ==================================================
 
-  const adultTicket = train.ticket;
+  const adultTicket =
+    train.ticket;
+
   const childTicketPercent =
     numberValue(data.childTicketPercent) || 60;
 
-  const childTicket =
-    Math.round(adultTicket * childTicketPercent / 100);
+  const childBaseTicket =
+    Math.round(
+      adultTicket *
+      childTicketPercent /
+      100
+    );
+
+  // بزرگسال
+  const adultTicketOneWayWithIssue =
+    adultTicket +
+    TICKET_ISSUE_FEE;
+
+  const adultTicketRoundTrip =
+    adultTicketOneWayWithIssue * 2;
+
+  // کودک
+  const childTicketOneWayWithIssue =
+    childBaseTicket +
+    TICKET_ISSUE_FEE;
+
+  const childTicketRoundTrip =
+    childTicketOneWayWithIssue * 2;
 
   const totalAdultTicket =
-    adults * adultTicket;
+    adults *
+    adultTicketRoundTrip;
 
   const totalChildTicket =
-    children * childTicket;
+    children *
+    childTicketRoundTrip;
 
   const totalTicket =
-    totalAdultTicket + totalChildTicket;
+    totalAdultTicket +
+    totalChildTicket;
 
-  // --------------------------------------------------
+  // ==================================================
   // هتل
-  //
-  // کودک را فعلاً با 50 درصد قیمت هتل محاسبه می‌کنیم.
-  // --------------------------------------------------
+  // ==================================================
 
   const childHotelPercent =
     numberValue(data.childHotelPercent) || 50;
 
   const totalAdultHotel =
-    adults * nights * hotelPrice;
+    adults *
+    nights *
+    hotelPrice;
 
   const childHotel =
-    Math.round(hotelPrice * childHotelPercent / 100);
+    Math.round(
+      hotelPrice *
+      childHotelPercent /
+      100
+    );
 
   const totalChildHotel =
-    children * nights * childHotel;
+    children *
+    nights *
+    childHotel;
 
   const totalHotel =
-    totalAdultHotel + totalChildHotel;
+    totalAdultHotel +
+    totalChildHotel;
 
-  // --------------------------------------------------
+  // ==================================================
+  // اجاره کوپه و تخت خالی
+  // ==================================================
+
+  const berthOption =
+    data.berthOption ||
+    data.compartmentType ||
+    data.coupeType ||
+    data.cabinType ||
+    "";
+
+  const berthCapacity =
+    getBerthCapacity(
+      berthOption,
+      train
+    );
+
+  const emptyBerth =
+    calculateEmptyBerths(
+      totalPassengers,
+      berthCapacity
+    );
+
+  const emptyBerthTotal =
+    emptyBerth.emptyBerthTotal;
+
+  const emptyBerthPerPerson =
+    emptyBerth.emptyBerthPerPerson;
+
+  // ==================================================
   // هزینه پایه
-  // --------------------------------------------------
+  // ==================================================
 
   const baseCost =
-    totalTicket + totalHotel;
+    totalTicket +
+    totalHotel +
+    emptyBerthTotal;
 
-  // --------------------------------------------------
-  // سود
-  // --------------------------------------------------
+  // ==================================================
+  // نوع پرداخت
+  // ==================================================
 
   const paymentType =
-    String(data.paymentType || "cash").toLowerCase();
+    String(
+      data.paymentType || "cash"
+    ).toLowerCase();
 
   const isLoan =
     paymentType === "loan" ||
     paymentType === "diamond" ||
     paymentType === "طرح الماس";
 
-  const profitPerPerson =
-    isLoan ? 5000000 : 3000000;
+  // ==================================================
+  // سود
+  // ==================================================
 
-  const totalPassengers =
-    adults + children;
+  const profitPerPerson =
+    isLoan
+      ? LOAN_PROFIT_PER_PERSON
+      : CASH_PROFIT_PER_PERSON;
 
   const totalProfit =
-    totalPassengers * profitPerPerson;
+    totalPassengers *
+    profitPerPerson;
 
-  // --------------------------------------------------
-  // قیمت نهایی فروش
-  // --------------------------------------------------
+  // ==================================================
+  // قیمت نهایی
+  // ==================================================
 
   const finalCost =
-    baseCost + totalProfit;
+    baseCost +
+    totalProfit;
 
-  // --------------------------------------------------
+  // ==================================================
   // طرح الماس
-  // --------------------------------------------------
+  //
+  // ۶۰٪ ابتدا محاسبه می‌شود.
+  // سپس وام به نزدیک‌ترین ۵ میلیون گرد می‌شود.
+  //
+  // نکته مهم:
+  // مبلغ نقدی = مبلغ نهایی - وام گرد شده
+  //
+  // بنابراین مابه‌التفاوت گرد شدن وام
+  // مستقیماً روی سهم نقدی می‌رود.
+  // ==================================================
 
-  let customerCash = finalCost;
-  let loanAmount = 0;
+  let customerCash =
+    finalCost;
+
+  let loanAmount =
+    0;
+
+  let rawLoanAmount =
+    0;
+
+  let loanRoundingDifference =
+    0;
 
   if (isLoan) {
 
-    customerCash =
-      Math.round(finalCost * 0.4);
+    rawLoanAmount =
+      Math.round(
+        finalCost * 0.60
+      );
 
     loanAmount =
-      roundLoanAmount(finalCost * 0.6);
+      roundLoanAmount(
+        rawLoanAmount
+      );
+
+    customerCash =
+      finalCost -
+      loanAmount;
+
+    loanRoundingDifference =
+      loanAmount -
+      rawLoanAmount;
   }
 
+  // ==================================================
+  // خروجی
+  // ==================================================
+
   return {
+
     type: "RAIL",
 
     route,
@@ -320,19 +568,69 @@ function calculateRailTour(data = {}) {
 
     hotelPrice,
 
-    childTicketPercent,
-    childHotelPercent,
+    // ----------------------------------------------
+    // بلیت
+    // ----------------------------------------------
+
+    ticketIssueFee:
+      TICKET_ISSUE_FEE,
 
     adultTicket,
-    childTicket,
+    childTicket:
+      childBaseTicket,
+
+    adultTicketOneWayWithIssue,
+    childTicketOneWayWithIssue,
+
+    adultTicketRoundTrip,
+    childTicketRoundTrip,
 
     totalAdultTicket,
     totalChildTicket,
     totalTicket,
 
+    childTicketPercent,
+
+    // ----------------------------------------------
+    // هتل
+    // ----------------------------------------------
+
+    childHotelPercent,
+
+    childHotel,
+
     totalAdultHotel,
     totalChildHotel,
     totalHotel,
+
+    // ----------------------------------------------
+    // کوپه
+    // ----------------------------------------------
+
+    berthOption,
+
+    berthCapacity:
+      emptyBerth.berthCapacity,
+
+    compartmentsNeeded:
+      emptyBerth.compartmentsNeeded,
+
+    totalBerths:
+      emptyBerth.totalBerths,
+
+    emptyBerths:
+      emptyBerth.emptyBerths,
+
+    emptyBerthPrice:
+      EMPTY_BERTH_PRICE,
+
+    emptyBerthTotal,
+
+    emptyBerthPerPerson,
+
+    // ----------------------------------------------
+    // جمع
+    // ----------------------------------------------
 
     baseCost,
 
@@ -344,8 +642,17 @@ function calculateRailTour(data = {}) {
     paymentType,
     isLoan,
 
+    // ----------------------------------------------
+    // طرح الماس
+    // ----------------------------------------------
+
+    rawLoanAmount,
+
+    loanAmount,
+
     customerCash,
-    loanAmount
+
+    loanRoundingDifference
   };
 }
 
@@ -368,36 +675,113 @@ function formatRailCalculation(result) {
   text += `🚆 مسیر: ${result.routeName}\n`;
 
   text += `🚆 قطار: ${result.trainName}\n`;
-  text += `🛏 نوع کوپه: ${result.berth}\n`;
+
+  text += `🛏 نوع قطار: ${result.berth}\n`;
+
+  if (result.berthOption) {
+
+    if (result.berthCapacity > 0) {
+
+      text += `🚆 نوع اجاره: کوپه ${result.berthCapacity} تخته\n`;
+
+    } else {
+
+      text += "🚫 اجاره کوپه: ندارد\n";
+    }
+
+  } else {
+
+    text += "🚫 اجاره کوپه: ندارد\n";
+  }
+
   text += `⭐ درجه: ${result.trainStars}\n`;
   text += `🕐 حرکت: ${result.departure}\n`;
   text += `🕐 ورود: ${result.arrival}\n`;
 
   text += "━━━━━━━━━━━━━━━━━━\n";
 
-  text += `🎫 قیمت بلیت هر بزرگسال: ${formatMoney(result.adultTicket)} تومان\n`;
-  text += `🎫 قیمت بلیت کودک: ${formatMoney(result.childTicket)} تومان\n`;
+  text += `🎫 قیمت پایه بلیت بزرگسال: ${formatMoney(
+    result.adultTicket
+  )} تومان\n`;
+
+  text += `🎫 هزینه صدور هر مسیر: ${formatMoney(
+    result.ticketIssueFee
+  )} تومان\n`;
+
+  text += `🎫 بلیت بزرگسال با صدور رفت‌وبرگشت: ${formatMoney(
+    result.adultTicketRoundTrip
+  )} تومان\n`;
+
+  text += `🎫 بلیت کودک با صدور رفت‌وبرگشت: ${formatMoney(
+    result.childTicketRoundTrip
+  )} تومان\n`;
 
   text += `👨 بزرگسال: ${result.adults} نفر\n`;
   text += `👶 کودک: ${result.children} نفر\n`;
+  text += `👥 مجموع مسافران: ${result.totalPassengers} نفر\n`;
 
   text += `🌙 تعداد شب: ${result.nights} شب\n`;
 
-  text += `🏨 قیمت هتل هر نفر/شب: ${formatMoney(result.hotelPrice)} تومان\n`;
+  text += `🏨 قیمت هتل هر نفر/شب: ${formatMoney(
+    result.hotelPrice
+  )} تومان\n`;
 
   text += "━━━━━━━━━━━━━━━━━━\n";
 
-  text += `🎫 مجموع بلیت: ${formatMoney(result.totalTicket)} تومان\n`;
-  text += `🏨 مجموع هتل: ${formatMoney(result.totalHotel)} تومان\n`;
+  text += `🎫 مجموع بلیت رفت‌وبرگشت: ${formatMoney(
+    result.totalTicket
+  )} تومان\n`;
 
-  text += `💵 هزینه پایه: ${formatMoney(result.baseCost)} تومان\n`;
+  text += `🏨 مجموع هتل: ${formatMoney(
+    result.totalHotel
+  )} تومان\n`;
+
+  // ----------------------------------------------
+  // تخت خالی
+  // ----------------------------------------------
+
+  if (result.berthCapacity > 0) {
+
+    text += `🛏 ظرفیت کوپه: ${result.berthCapacity} نفر\n`;
+
+    text += `🛏 تعداد کوپه موردنیاز: ${result.compartmentsNeeded} عدد\n`;
+
+    text += `🛏 تخت خالی: ${result.emptyBerths} عدد\n`;
+
+    text += `💵 هزینه هر تخت خالی: ${formatMoney(
+      result.emptyBerthPrice
+    )} تومان\n`;
+
+    text += `💵 مجموع هزینه تخت خالی: ${formatMoney(
+      result.emptyBerthTotal
+    )} تومان\n`;
+
+    text += `💵 سهم هر مسافر از تخت خالی: ${formatMoney(
+      result.emptyBerthPerPerson
+    )} تومان\n`;
+
+  } else {
+
+    text += "🛏 هزینه تخت خالی: ندارد\n";
+  }
 
   text += "━━━━━━━━━━━━━━━━━━\n";
 
-  text += `📈 سود هر نفر: ${formatMoney(result.profitPerPerson)} تومان\n`;
-  text += `📈 مجموع سود: ${formatMoney(result.totalProfit)} تومان\n`;
+  text += `💵 هزینه پایه: ${formatMoney(
+    result.baseCost
+  )} تومان\n`;
 
-  text += `💰 قیمت نهایی: ${formatMoney(result.finalCost)} تومان\n`;
+  text += `📈 سود هر نفر: ${formatMoney(
+    result.profitPerPerson
+  )} تومان\n`;
+
+  text += `📈 مجموع سود: ${formatMoney(
+    result.totalProfit
+  )} تومان\n`;
+
+  text += `💰 قیمت نهایی: ${formatMoney(
+    result.finalCost
+  )} تومان\n`;
 
   text += "━━━━━━━━━━━━━━━━━━\n";
 
@@ -405,14 +789,46 @@ function formatRailCalculation(result) {
 
   if (result.isLoan) {
 
-    text += `\n💵 سهم نقدی ۴۰٪: ${formatMoney(result.customerCash)} تومان\n`;
-
-    text += `🏦 مبلغ وام ۶۰٪ قبل از گرد کردن: ${formatMoney(
-      result.finalCost * 0.6
+    text += `\n🏦 وام ۶۰٪ قبل از گرد کردن: ${formatMoney(
+      result.rawLoanAmount
     )} تومان\n`;
 
     text += `🏦 مبلغ وام گرد شده: ${formatMoney(
       result.loanAmount
+    )} تومان\n`;
+
+    text += `💵 مبلغ نقدی مشتری: ${formatMoney(
+      result.customerCash
+    )} تومان\n`;
+
+    if (result.loanRoundingDifference !== 0) {
+
+      const difference =
+        Math.abs(
+          result.loanRoundingDifference
+        );
+
+      if (result.loanRoundingDifference > 0) {
+
+        text += `➕ مابه‌التفاوت گرد کردن وام: ${formatMoney(
+          difference
+        )} تومان\n`;
+
+        text += "ℹ️ این مبلغ از سهم نقدی مشتری کسر شده است.\n";
+
+      } else {
+
+        text += `➖ اختلاف گرد کردن وام: ${formatMoney(
+          difference
+        )} تومان\n`;
+
+        text += "ℹ️ این مبلغ به سهم نقدی مشتری اضافه شده است.\n";
+      }
+    }
+
+    text += `\n🧾 کنترل نهایی:\n`;
+    text += `💵 نقدی + 🏦 وام = ${formatMoney(
+      result.customerCash + result.loanAmount
     )} تومان\n`;
 
   } else {
@@ -433,27 +849,35 @@ function formatRailCalculation(result) {
 
 function calculateManualTour(data = {}) {
 
-  const adults = numberValue(data.adults);
-  const children = numberValue(data.children);
-  const nights = numberValue(data.nights);
+  const adults =
+    numberValue(data.adults);
 
-  const ticketAdult = numberValue(
-    data.ticketAdult ||
-    data.ticketPrice ||
-    data.ticket
-  );
+  const children =
+    numberValue(data.children);
 
-  const hotelAdult = numberValue(
-    data.hotelAdult ||
-    data.hotelPrice ||
-    data.hotel
-  );
+  const nights =
+    numberValue(data.nights);
 
-  const profitPerPerson = numberValue(
-    data.manualProfit ||
-    data.profitPerPerson ||
-    data.profit
-  );
+  const ticketAdult =
+    numberValue(
+      data.ticketAdult ||
+      data.ticketPrice ||
+      data.ticket
+    );
+
+  const hotelAdult =
+    numberValue(
+      data.hotelAdult ||
+      data.hotelPrice ||
+      data.hotel
+    );
+
+  const profitPerPerson =
+    numberValue(
+      data.manualProfit ||
+      data.profitPerPerson ||
+      data.profit
+    );
 
   const childTicketPercent =
     numberValue(data.childTicketPercent) || 60;
@@ -462,43 +886,76 @@ function calculateManualTour(data = {}) {
     numberValue(data.childHotelPercent) || 50;
 
   const childTicket =
-    Math.round(ticketAdult * childTicketPercent / 100);
+    Math.round(
+      ticketAdult *
+      childTicketPercent /
+      100
+    );
 
   const childHotel =
-    Math.round(hotelAdult * childHotelPercent / 100);
+    Math.round(
+      hotelAdult *
+      childHotelPercent /
+      100
+    );
 
   const totalTicket =
     adults * ticketAdult +
     children * childTicket;
 
   const totalHotel =
-    adults * nights * hotelAdult +
-    children * nights * childHotel;
+    adults *
+      nights *
+      hotelAdult +
+    children *
+      nights *
+      childHotel;
 
   const totalPassengers =
     adults + children;
 
   const baseCost =
-    totalTicket + totalHotel;
+    totalTicket +
+    totalHotel;
 
   const totalProfit =
-    totalPassengers * profitPerPerson;
+    totalPassengers *
+    profitPerPerson;
 
   const finalCost =
-    baseCost + totalProfit;
+    baseCost +
+    totalProfit;
 
   const isLoan =
-    String(data.paymentType || "").toLowerCase() === "loan";
+    String(
+      data.paymentType || ""
+    ).toLowerCase() === "loan";
 
-  const customerCash =
-    isLoan
-      ? Math.round(finalCost * 0.4)
-      : finalCost;
+  let customerCash =
+    finalCost;
 
-  const loanAmount =
-    isLoan
-      ? roundLoanAmount(finalCost * 0.6)
-      : 0;
+  let loanAmount =
+    0;
+
+  let rawLoanAmount =
+    0;
+
+  if (isLoan) {
+
+    rawLoanAmount =
+      Math.round(
+        finalCost * 0.60
+      );
+
+    loanAmount =
+      roundLoanAmount(
+        rawLoanAmount
+      );
+
+    customerCash =
+      finalCost -
+      loanAmount;
+  }
 
   return {
     ...data,
@@ -526,6 +983,8 @@ function calculateManualTour(data = {}) {
     finalCost,
 
     isLoan,
+
+    rawLoanAmount,
     customerCash,
     loanAmount
   };
@@ -548,29 +1007,68 @@ function formatManualCalculation(result) {
 
   text += "━━━━━━━━━━━━━━━━━━\n";
 
-  text += `🎫 بلیت بزرگسال: ${formatMoney(result.ticketAdult)} تومان\n`;
-  text += `🎫 بلیت کودک: ${formatMoney(result.childTicket)} تومان\n`;
+  text += `🎫 بلیت بزرگسال: ${formatMoney(
+    result.ticketAdult
+  )} تومان\n`;
 
-  text += `🏨 هتل بزرگسال: ${formatMoney(result.hotelAdult)} تومان\n`;
-  text += `🏨 هتل کودک: ${formatMoney(result.childHotel)} تومان\n`;
+  text += `🎫 بلیت کودک: ${formatMoney(
+    result.childTicket
+  )} تومان\n`;
+
+  text += `🏨 هتل بزرگسال: ${formatMoney(
+    result.hotelAdult
+  )} تومان\n`;
+
+  text += `🏨 هتل کودک: ${formatMoney(
+    result.childHotel
+  )} تومان\n`;
 
   text += "━━━━━━━━━━━━━━━━━━\n";
 
-  text += `🎫 مجموع بلیت: ${formatMoney(result.totalTicket)} تومان\n`;
-  text += `🏨 مجموع هتل: ${formatMoney(result.totalHotel)} تومان\n`;
+  text += `🎫 مجموع بلیت: ${formatMoney(
+    result.totalTicket
+  )} تومان\n`;
 
-  text += `💵 هزینه پایه: ${formatMoney(result.baseCost)} تومان\n`;
+  text += `🏨 مجموع هتل: ${formatMoney(
+    result.totalHotel
+  )} تومان\n`;
 
-  text += `📈 سود هر نفر: ${formatMoney(result.profitPerPerson)} تومان\n`;
-  text += `📈 مجموع سود: ${formatMoney(result.totalProfit)} تومان\n`;
+  text += `💵 هزینه پایه: ${formatMoney(
+    result.baseCost
+  )} تومان\n`;
 
-  text += `💰 قیمت نهایی: ${formatMoney(result.finalCost)} تومان\n`;
+  text += `📈 سود هر نفر: ${formatMoney(
+    result.profitPerPerson
+  )} تومان\n`;
+
+  text += `📈 مجموع سود: ${formatMoney(
+    result.totalProfit
+  )} تومان\n`;
+
+  text += `💰 قیمت نهایی: ${formatMoney(
+    result.finalCost
+  )} تومان\n`;
 
   if (result.isLoan) {
 
     text += "━━━━━━━━━━━━━━━━━━\n";
-    text += `💵 سهم نقدی ۴۰٪: ${formatMoney(result.customerCash)} تومان\n`;
-    text += `🏦 وام ۶۰٪ گرد شده: ${formatMoney(result.loanAmount)} تومان\n`;
+
+    text += `🏦 وام ۶۰٪ قبل از گرد کردن: ${formatMoney(
+      result.rawLoanAmount
+    )} تومان\n`;
+
+    text += `🏦 وام ۶۰٪ گرد شده: ${formatMoney(
+      result.loanAmount
+    )} تومان\n`;
+
+    text += `💵 سهم نقدی مشتری: ${formatMoney(
+      result.customerCash
+    )} تومان\n`;
+
+    text += `🧾 کنترل: نقدی + وام = ${formatMoney(
+      result.customerCash +
+      result.loanAmount
+    )} تومان\n`;
   }
 
   text += "━━━━━━━━━━━━━━━━━━";
@@ -604,5 +1102,17 @@ module.exports = {
 
   roundLoanAmount,
 
-  formatMoney
+  formatMoney,
+
+  getBerthCapacity,
+
+  calculateEmptyBerths,
+
+  TICKET_ISSUE_FEE,
+
+  EMPTY_BERTH_PRICE,
+
+  CASH_PROFIT_PER_PERSON,
+
+  LOAN_PROFIT_PER_PERSON
 };

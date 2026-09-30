@@ -1,162 +1,108 @@
-// ========================================
-// تنظیمات اصلی ربات سفر مشهد توس
-// ========================================
+require("dotenv").config();
 
 const CONFIG = {
+  PORT: Number(
+    process.env.PORT || 10000
+  ),
 
-  // نام ربات
-  BOT_NAME: "safarmashhadtoos_bot",
+  BOT_TOKEN:
+    process.env.BALE_BOT_TOKEN ||
+    process.env.BOT_TOKEN ||
+    "",
 
-  // نام نمایشی ربات
-  BOT_TITLE: "سفر مشهد توس",
+  ADMIN_CHAT_ID:
+    String(
+      process.env.ADMIN_CHAT_ID || ""
+    ),
 
-  // شماره تماس
-  CONTACT_PHONE: "۰۹۱۷۷۷۰۰۹۶۱",
+  BALE_API_BASE:
+    process.env.BALE_API_BASE ||
+    "https://tapi.bale.ai/bot",
 
-  // نام مسئول
-  ADMIN_NAME: "حمید جاویدی",
+  BOT_NAME:
+    "safarmashhadtoos_bot",
 
-  // آدرس کانال بله
-  CHANNEL_URL: "https://ble.ir/safarmashhadtoos",
+  BOT_TITLE:
+    "سفر مشهد توس",
 
-  // آدرس ربات
-  BOT_USERNAME: "@safarmashhadtoos_bot",
+  CONTACT: {
+    name:
+      "حمید جاویدی",
 
-  // آدرس سایت
-  WEBSITE_URL: "https://safarmashhadtoos.ir",
+    phone:
+      "۰۹۱۷۷۷۰۰۹۶۱"
+  },
 
-  // ========================================
-  // تنظیمات تور ریلی
-  // ========================================
+  CHANNEL_URL:
+    "https://ble.ir/safarmashhadtoos",
+
+  BOT_USERNAME:
+    "@safarmashhadtoos_bot",
+
+  WEBSITE_URL:
+    "https://safarmashhadtoos.ir",
+
+  DIAMOND_QBANK_URL:
+    "https://qbank24.ir/downloads",
+
+  PAYMENT: {
+    bank:
+      "مهر ایران",
+
+    owner:
+      "مهدی رشیدیان طرقی",
+
+    card:
+      "6063731161437174",
+
+    account:
+      "363470014517217001",
+
+    iban:
+      "IR160600363470014517217001"
+  },
 
   RAIL: {
 
-    // هزینه صدور بلیت
-    TICKET_ISSUE_FEE: 0,
+    TICKET_ISSUE_FEE:
+      200000,
 
-    // درصد بلیت کودک
-    CHILD_TICKET_PERCENT: 50,
-
-    // ========================================
-    // قیمت بلیت ریلی
-    // ========================================
+    CHILD_TICKET_PERCENT:
+      60,
 
     TICKET_PRICES: {
 
-      // --------------------------------------
-      // اهواز → مشهد
-      // --------------------------------------
+      AHVAZ: {
+        name:
+          "اهواز ↔ مشهد",
 
-      AHVAZ_MASHHAD: {
-
-        name: "اهواز → مشهد",
-
-        // گزینه اصلی ۴ تخته
         FOUR_BERTH: {
-          name: "امید",
-          company: "رجا",
-          stars: 4,
-          price: 2010000
+          price:
+            2990000
         },
 
-        // گزینه اصلی ۶ تخته
         SIX_BERTH: {
-          name: "مهدیس",
-          company: "مهتاب سیر جم",
-          stars: 3,
-          price: 1940000
-        },
-
-        // تمام گزینه‌های ۴ تخته
-        FOUR_BERTH_OPTIONS: [
-
-          {
-            name: "امید",
-            company: "رجا",
-            stars: 4,
-            departure: "16:40",
-            arrival: "19:25",
-            price: 2010000
-          },
-
-          {
-            name: "کرخه",
-            company: "پارس لاریم",
-            stars: 4,
-            departure: "13:20",
-            arrival: "15:25",
-            price: 2230000
-          }
-
-        ],
-
-        // تمام گزینه‌های ۶ تخته
-        SIX_BERTH_OPTIONS: [
-
-          {
-            name: "مهدیس",
-            company: "مهتاب سیر جم",
-            stars: 3,
-            departure: "13:20",
-            arrival: "15:25",
-            price: 1940000
-          }
-
-        ]
-
+          price:
+            2990000
+        }
       },
 
-      // --------------------------------------
-      // شیراز → مشهد
-      // --------------------------------------
+      SHIRAZ: {
+        name:
+          "شیراز ↔ مشهد",
 
-      SHIRAZ_MASHHAD: {
-
-        name: "شیراز → مشهد",
-
-        // گزینه اصلی ۴ تخته
         FOUR_BERTH: {
-          name: "سرير",
-          company: "رجا",
-          stars: 4,
-          price: 2010000
+          price:
+            2990000
         },
 
-        // فعلاً گزینه ۶ تخته نداریم
-        SIX_BERTH: null,
-
-        // تمام گزینه‌های ۴ تخته
-        FOUR_BERTH_OPTIONS: [
-
-          {
-            name: "سرير",
-            company: "رجا",
-            stars: 4,
-            departure: "15:30",
-            arrival: "15:45",
-            price: 2010000
-          },
-
-          {
-            name: "آهو",
-            company: "رجا",
-            stars: 4,
-            departure: "15:30",
-            arrival: "15:45",
-            price: 2990000
-          }
-
-        ],
-
-        // گزینه‌های ۶ تخته
-        SIX_BERTH_OPTIONS: []
-
+        SIX_BERTH: {
+          price:
+            2990000
+        }
       }
-
     }
-
   }
-
 };
 
 module.exports = CONFIG;

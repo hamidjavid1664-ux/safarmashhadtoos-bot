@@ -1,24 +1,20 @@
 const CONFIG = require("./config");
 
 function formatMoney(number) {
-  return new Intl.NumberFormat("fa-IR")
-    .format(
-      Math.round(
-        Number(number || 0)
-      )
-    );
+  return new Intl.NumberFormat("fa-IR").format(
+    Math.round(Number(number || 0))
+  );
 }
 
 function roundLoanAmount(amount) {
-  return Math.round(
-    Number(amount || 0) / 5000000
-  ) * 5000000;
+  return (
+    Math.round(Number(amount || 0) / 5000000) *
+    5000000
+  );
 }
 
 function getCompartmentPlan(passengers) {
-
-  passengers =
-    Number(passengers || 0);
+  passengers = Number(passengers || 0);
 
   let best = null;
 
@@ -27,13 +23,11 @@ function getCompartmentPlan(passengers) {
     six <= Math.ceil(passengers / 6) + 2;
     six++
   ) {
-
     for (
       let four = 0;
       four <= Math.ceil(passengers / 4) + 2;
       four++
     ) {
-
       const capacity =
         six * 6 +
         four * 4;
@@ -74,8 +68,7 @@ function getCompartmentPlan(passengers) {
       ...Array(best.six).fill("۶ تخته")
     ],
 
-    capacity:
-      best.capacity,
+    capacity: best.capacity,
 
     emptyBerths:
       best.emptyBerths,
@@ -88,11 +81,7 @@ function getCompartmentPlan(passengers) {
   };
 }
 
-function getTicketPrice(
-  route,
-  type
-) {
-
+function getTicketPrice(route, type) {
   const r =
     CONFIG.RAIL.TICKET_PRICES[route];
 
@@ -117,7 +106,6 @@ function getTicketPrice(
 }
 
 function calculateRailTour(data) {
-
   const route =
     data.route;
 
@@ -192,14 +180,12 @@ function calculateRailTour(data) {
   let compartmentPlan = null;
 
   if (privateCompartment) {
-
     compartmentPlan =
       getCompartmentPlan(
         totalPassengers
       );
 
     if (compartmentPlan.fourBerth) {
-
       const price =
         getTicketPrice(
           route,
@@ -227,7 +213,6 @@ function calculateRailTour(data) {
     }
 
     if (compartmentPlan.sixBerth) {
-
       const price =
         getTicketPrice(
           route,
@@ -265,7 +250,6 @@ function calculateRailTour(data) {
       perPerson;
 
   } else {
-
     const ticketPrice =
       Math.max(
         routeConfig.FOUR_BERTH?.price || 0,
@@ -340,6 +324,11 @@ function calculateRailTour(data) {
     netPurchaseTotal +
     totalProfit;
 
+  /*
+   * طرح الماس:
+   * ۶۰٪ مبلغ طرح
+   * رُند به نزدیک‌ترین ۵ میلیون تومان
+   */
   const loanAmount =
     paymentType === "loan"
       ? roundLoanAmount(
@@ -347,6 +336,10 @@ function calculateRailTour(data) {
         )
       : 0;
 
+  /*
+   * سهم نقدی مشتری
+   * برابر با باقی‌مانده قیمت نهایی بعد از مبلغ رُندشده طرح
+   */
   const customerCash =
     paymentType === "loan"
       ? finalPrice -
@@ -383,7 +376,6 @@ function calculateRailTour(data) {
 }
 
 function formatRailCalculation(r) {
-
   const routeName =
     CONFIG.RAIL
       .TICKET_PRICES[r.route]
@@ -401,7 +393,6 @@ function formatRailCalculation(r) {
     `🚆 مسیر: ${routeName}\n`;
 
   if (r.privateCompartment) {
-
     text +=
       `🛏️ نوع کوپه: ${r.compartmentPlan.compartments.join(" + ")}\n`;
   }
@@ -420,7 +411,6 @@ function formatRailCalculation(r) {
     "🚆 محاسبه قطار\n";
 
   if (!r.privateCompartment) {
-
     text +=
       `قیمت بلیط: ${formatMoney(t.ticketPrice)} تومان\n`;
 
@@ -434,7 +424,6 @@ function formatRailCalculation(r) {
       `بلیط رفت و برگشت کودک: ${formatMoney(t.childRoundTrip)} تومان\n`;
 
   } else {
-
     text +=
       `قیمت بلیط: ${formatMoney(t.price)} تومان\n`;
 
@@ -503,18 +492,16 @@ function formatRailCalculation(r) {
     "━━━━━━━━━━━━━━━━━━";
 
   if (r.paymentType === "loan") {
-
     text +=
       `\n\n💎 طرح الماس\n` +
-      `💵 سهم نقدی: ${formatMoney(r.customerCash)} تومان\n` +
-      `💎 مبلغ وام رُندشده: ${formatMoney(r.loanAmount)} تومان`;
+      `💵 سهم پرداخت مشتری (۴۰٪): ${formatMoney(r.customerCash)} تومان\n` +
+      `💳 مبلغ طرح الماس (۶۰٪): ${formatMoney(r.loanAmount)} تومان`;
   }
 
   return text;
 }
 
 function calculateManualTour(data) {
-
   const adults =
     Number(data.adults || 0);
 
@@ -634,7 +621,6 @@ function calculateManualTour(data) {
 }
 
 function formatManualCalculation(r) {
-
   return (
     `🧮 محاسبه داخلی مدیر\n` +
     `━━━━━━━━━━━━━━━━━━\n` +
@@ -653,8 +639,8 @@ function formatManualCalculation(r) {
     `💵 قیمت نهایی: ${formatMoney(r.finalPrice)} تومان` +
     (
       r.paymentType === "loan"
-        ? `\n\n💎 سهم نقدی: ${formatMoney(r.customerCash)} تومان\n` +
-          `💎 وام: ${formatMoney(r.loanAmount)} تومان`
+        ? `\n\n💎 سهم پرداخت مشتری (۴۰٪): ${formatMoney(r.customerCash)} تومان\n` +
+          `💳 مبلغ طرح الماس (۶۰٪): ${formatMoney(r.loanAmount)} تومان`
         : ""
     )
   );

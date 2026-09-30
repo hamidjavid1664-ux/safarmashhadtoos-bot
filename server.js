@@ -487,7 +487,7 @@ function diamondPaymentText(req) {
 💰 هزینه کل سفر: ${money(total)} تومان
 💳 سهم نقدی ۴۰٪: ${money(cash)} تومان
 
-لطفاً مبلغ را پرداخت کنید و تصویر فیش را ارسال نمایید.`;
+${paymentInfoText()}`;
   }
 
   return `💎 درخواست طرح الماس تأیید شد.
@@ -495,6 +495,196 @@ function diamondPaymentText(req) {
 🆔 درخواست: ${req.request_code}
 
 پس از مشخص شدن مبلغ نهایی، ۴۰٪ آن را پرداخت کنید و تصویر فیش را ارسال نمایید.`;
+}
+
+/*
+ * =========================================================
+ * ارسال مبلغ محاسبه‌شده برای مشتری - قبل از تأیید
+ * =========================================================
+ */
+function calculatedPaymentText(req) {
+  const payload = req.payload || {};
+  const calc = payload.calculation || {};
+
+  const total = Number(
+    calc.finalCost ??
+    calc.totalCost ??
+    payload.totalCost ??
+    0
+  );
+
+  if (total <= 0) {
+    return null;
+  }
+
+  const paymentType =
+    req.payment_type ||
+    payload.paymentType ||
+    "cash";
+
+  let text = `💰 مبلغ سفر شما محاسبه شد.
+━━━━━━━━━━━━━━━━━━
+🆔 شماره درخواست: ${req.request_code}
+🚆 نوع سفر: ${TOUR_NAMES[req.request_type] || "تور ریلی"}
+👤 متقاضی: ${req.applicant_name || ""}
+📱 تلفن: ${req.phone || ""}
+━━━━━━━━━━━━━━━━━━
+💰 مبلغ کل سفر: ${money(total)} تومان
+`;
+
+  if (paymentType === "loan") {
+    /*
+     * در حالت طرح الماس:
+     * مبلغ نقدی مشتری را از نتیجه محاسبه می‌خوانیم.
+     * اگر pricing.js مقدار customerCash را داشته باشد
+     * همان مقدار استفاده می‌شود.
+     * در غیر این صورت ۴۰٪ مبلغ کل محاسبه می‌شود.
+     */
+    const customerCash = Number(
+      calc.customerCash ??
+      calc.cashAmount ??
+      calc.customerPayment ??
+      Math.ceil(total * 0.4)
+    );
+
+    text += `
+💎 نوع پرداخت: طرح الماس شهر بهشت
+💳 مبلغ قابل پرداخت اولیه: ${money(customerCash)} تومان
+
+${paymentInfoText()}
+
+⚠️ این پیام صرفاً جهت اعلام مبلغ و اطلاعات واریز است.
+✅ تأیید نهایی درخواست هنوز انجام نشده است.
+`;
+  } else {
+    text += `
+💵 نوع پرداخت: نقدی
+💳 مبلغ قابل واریز: ${money(total)} تومان
+
+${paymentInfoText()}
+
+⚠️ این پیام صرفاً جهت اعلام مبلغ و اطلاعات واریز است.
+✅ تأیید نهایی درخواست هنوز انجام نشده است.
+`;
+  }
+
+  return text;
+}
+
+/*
+ * =========================================================
+ * ارسال مبلغ محاسبه‌شده به مشتری
+ * =========================================================
+ */
+async function sendCalculatedAmountToCustomer(
+  adminId,
+  code
+) {
+  if (!isAdmin(adminId)) return;
+
+  const r = await pool.query(
+    "SELECT * FROM requests WHERE request_code=$1",
+    [code]
+  );
+
+  if (!r.rows.length) {
+    await sendMessage(
+      adminId,
+      "❌ درخواست پیدا نشد."
+    );
+    return;
+  }
+
+  const req = r.rows[0];
+  const payload = req.payload || {};
+  const calc = payload.calculation || {};
+
+  const total = Number(
+    calc.finalCost ??
+    calc.totalCost ??
+    payload.totalCost ??
+    0
+  );
+
+  if (total <= 0) {
+    await sendMessage(
+      adminId,
+      "❌ مبلغ محاسبه‌شده برای این درخواست پیدا نشد."
+    );
+    return;
+  }
+
+  /*
+   * درخواست ردشده نباید مبلغ دریافت کند.
+   */
+  if (req.status === "rejected") {
+    await sendMessage(
+      adminId,
+      "❌ این درخواست قبلاً رد شده است."
+    );
+    return;
+  }
+
+  /*
+   * پیام مشتری
+   */
+  const customerText =
+    calculatedPaymentText(req);
+
+  if (!customerText) {
+    await sendMessage(
+      adminId,
+      "❌ متن مبلغ قابل ارسال ساخته نشد."
+    );
+    return;
+  }
+
+  try {
+    await sendMessage(
+      req.user_id,
+      customerText
+    );
+
+    /*
+     * فقط ثبت می‌کنیم که مبلغ برای مشتری ارسال شده.
+     * وضعیت تأیید تغییر نمی‌کند.
+     */
+    await pool.query(
+      `UPDATE requests
+       SET payload = payload || $2::jsonb,
+           updated_at = NOW()
+       WHERE request_code=$1`,
+      [
+        code,
+        JSON.stringify({
+          calculationSentToCustomer: true,
+          calculationSentAt: new Date().toISOString()
+        })
+      ]
+    );
+
+    await sendMessage(
+      adminId,
+      `✅ مبلغ درخواست ${code} برای مشتری ارسال شد.
+
+💰 مبلغ کل: ${money(total)} تومان
+
+⚠️ درخواست هنوز تأیید نشده است.`
+    );
+
+  } catch (e) {
+    console.error(
+      "Send calculated amount error:",
+      e
+    );
+
+    await sendMessage(
+      adminId,
+      `❌ ارسال مبلغ برای مشتری انجام نشد.
+
+${e.message}`
+    );
+  }
 }
 
 async function startTour(chatId, type) {
@@ -1374,46 +1564,71 @@ async function handleMedia(
   return false;
 }
 
-function managerCalcMenu() {
-  return {
-    inline_keyboard: [
-      [
-        {
-          text: "🚆 محاسبه تور ریلی",
-          callback_data: "ADMIN_RAIL_CALC"
-        }
-      ],
-      [
-        {
-          text: "✈️ محاسبه دستی تور هوایی",
-          callback_data: "ADMIN_MANUAL_AIR"
-        }
-      ],
-      [
-        {
-          text: "🚌 محاسبه دستی تور اتوبوسی",
-          callback_data: "ADMIN_MANUAL_BUS"
-        }
-      ],
-      [
-        {
-          text: "🚍 محاسبه دستی کاروان اتوبوسی",
-          callback_data: "ADMIN_MANUAL_CARAVAN_BUS"
-        }
-      ],
-      [
-        {
-          text: "🚆 محاسبه دستی کاروان ریلی",
-          callback_data: "ADMIN_MANUAL_CARAVAN_RAIL"
-        }
-      ],
-      [
-        {
-          text: "🔙 خروج",
-          callback_data: "ADMIN_CALC_EXIT"
-        }
-      ]
+/*
+ * =========================================================
+ * منوی محاسبات مدیر
+ * =========================================================
+ */
+function managerCalcMenu(canSendAmount = false, requestCode = "") {
+  const rows = [
+    [
+      {
+        text: "🚆 محاسبه تور ریلی",
+        callback_data: "ADMIN_RAIL_CALC"
+      }
+    ],
+    [
+      {
+        text: "✈️ محاسبه دستی تور هوایی",
+        callback_data: "ADMIN_MANUAL_AIR"
+      }
+    ],
+    [
+      {
+        text: "🚌 محاسبه دستی تور اتوبوسی",
+        callback_data: "ADMIN_MANUAL_BUS"
+      }
+    ],
+    [
+      {
+        text: "🚍 محاسبه دستی کاروان اتوبوسی",
+        callback_data: "ADMIN_MANUAL_CARAVAN_BUS"
+      }
+    ],
+    [
+      {
+        text: "🚆 محاسبه دستی کاروان ریلی",
+        callback_data: "ADMIN_MANUAL_CARAVAN_RAIL"
+      }
     ]
+  ];
+
+  /*
+   * این دکمه فقط برای محاسبه‌ای است که به درخواست مشتری
+   * وصل شده باشد.
+   */
+  if (
+    canSendAmount &&
+    requestCode
+  ) {
+    rows.push([
+      {
+        text: "📨 ارسال مبلغ برای مشتری",
+        callback_data:
+          `SEND_CALC_AMOUNT:${requestCode}`
+      }
+    ]);
+  }
+
+  rows.push([
+    {
+      text: "🔙 خروج",
+      callback_data: "ADMIN_CALC_EXIT"
+    }
+  ]);
+
+  return {
+    inline_keyboard: rows
   };
 }
 
@@ -2101,6 +2316,30 @@ async function handleCallback(cb) {
     return;
   }
 
+  /*
+   * =========================================================
+   * ارسال مبلغ محاسبه‌شده برای مشتری
+   * =========================================================
+   */
+  if (
+    data.startsWith(
+      "SEND_CALC_AMOUNT:"
+    ) &&
+    isAdmin(chatId)
+  ) {
+    const code =
+      data.substring(
+        "SEND_CALC_AMOUNT:".length
+      );
+
+    await sendCalculatedAmountToCustomer(
+      chatId,
+      code
+    );
+
+    return;
+  }
+
   if (
     data === "ADMIN_RAIL_CALC" &&
     isAdmin(chatId)
@@ -2110,8 +2349,10 @@ async function handleCallback(cb) {
   }
 
   /*
+   * =========================================================
    * اتصال مستقیم درخواست ریلی مشتری
    * به محاسبه مدیر
+   * =========================================================
    */
   if (
     data.startsWith("CALC_REQUEST:") &&
@@ -2170,9 +2411,9 @@ async function handleCallback(cb) {
   }
 
   /*
-   * ================================
+   * =========================================================
    * انتخاب مسیر
-   * ================================
+   * =========================================================
    */
 
   if (
@@ -2229,9 +2470,9 @@ async function handleCallback(cb) {
   }
 
   /*
-   * ================================
+   * =========================================================
    * انتخاب قطار
-   * ================================
+   * =========================================================
    */
 
   if (
@@ -2265,9 +2506,6 @@ async function handleCallback(cb) {
       return;
     }
 
-    /*
-     * trainKey اینجا حتماً ذخیره می‌شود.
-     */
     await saveSession(
       chatId,
       "RAIL_BERTH",
@@ -2321,9 +2559,9 @@ async function handleCallback(cb) {
   }
 
   /*
-   * ================================
+   * =========================================================
    * انتخاب اجاره یا عدم اجاره کوپه
-   * ================================
+   * =========================================================
    */
 
   if (
@@ -2341,10 +2579,6 @@ async function handleCallback(cb) {
     const d =
       ss.data || {};
 
-    /*
-     * FIX اصلی:
-     * trainKey از Session خوانده می‌شود.
-     */
     const trainKey =
       d.trainKey;
 
@@ -2373,13 +2607,6 @@ async function handleCallback(cb) {
       return;
     }
 
-    /*
-     * بدون اجاره:
-     * هیچ هزینه تخت خالی محاسبه نمی‌شود.
-     *
-     * اجاره:
-     * ظرفیت واقعی قطار وارد pricing.js می‌شود.
-     */
     const berthOption =
       data === "RAIL_BERTH_RENT"
         ? (
@@ -2405,11 +2632,6 @@ async function handleCallback(cb) {
         ? "RAIL_HOTEL"
         : "RAIL_ADULTS";
 
-    /*
-     * خیلی مهم:
-     * berthOption داخل Session ذخیره می‌شود
-     * تا در مرحله محاسبه به pricing.js برسد.
-     */
     await saveSession(
       chatId,
       nextState,
@@ -2446,9 +2668,9 @@ async function handleCallback(cb) {
   }
 
   /*
-   * ================================
+   * =========================================================
    * محاسبه نهایی ریلی
-   * ================================
+   * =========================================================
    */
 
   if (
@@ -2467,10 +2689,6 @@ async function handleCallback(cb) {
       ss.data || {};
 
     try {
-      /*
-       * berthOption حتماً به pricing.js
-       * ارسال می‌شود.
-       */
       const result =
         PRICING.calculateRailTour({
           ...d,
@@ -2488,10 +2706,44 @@ async function handleCallback(cb) {
             "بدون اجاره"
         });
 
+      /*
+       * =====================================================
+       * ذخیره نتیجه محاسبه داخل همان درخواست
+       * =====================================================
+       */
+      if (d.requestCode) {
+        await pool.query(
+          `UPDATE requests
+           SET payload = payload || $2::jsonb,
+               updated_at = NOW()
+           WHERE request_code=$1`,
+          [
+            d.requestCode,
+            JSON.stringify({
+              calculation: result,
+              totalCost:
+                Number(
+                  result.finalCost ??
+                  result.totalCost ??
+                  0
+                ),
+              calculatedAt:
+                new Date().toISOString()
+            })
+          ]
+        );
+      }
+
+      /*
+       * Session مدیر را هم نگه می‌داریم.
+       */
       await saveSession(
         chatId,
         "ADMIN_CALC",
-        {}
+        {
+          ...d,
+          calculation: result
+        }
       );
 
       let out =
@@ -2508,10 +2760,17 @@ async function handleCallback(cb) {
 🪪 کد ملی: ${d.nationalCode || "ثبت نشده"}`;
       }
 
+      /*
+       * اگر این محاسبه مربوط به درخواست مشتری باشد،
+       * دکمه ارسال مبلغ هم نمایش داده می‌شود.
+       */
       await sendMessage(
         chatId,
         out,
-        managerCalcMenu()
+        managerCalcMenu(
+          Boolean(d.requestCode),
+          d.requestCode || ""
+        )
       );
 
     } catch (e) {
@@ -2531,9 +2790,9 @@ ${e.message}`
   }
 
   /*
-   * ================================
+   * =========================================================
    * محاسبات دستی
-   * ================================
+   * =========================================================
    */
 
   if (

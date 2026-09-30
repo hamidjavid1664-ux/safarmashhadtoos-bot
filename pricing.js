@@ -1,21 +1,10 @@
 const CONFIG = require("./config");
 
-
-// =========================================================
-// فرمت مبلغ
-// =========================================================
-
 function formatMoney(number) {
   return new Intl.NumberFormat("fa-IR").format(
     Math.round(Number(number || 0))
   );
 }
-
-
-// =========================================================
-// گرد کردن مبلغ طرح الماس
-// نزدیک‌ترین ۵ میلیون تومان
-// =========================================================
 
 function roundLoanAmount(amount) {
   return Math.round(
@@ -23,13 +12,7 @@ function roundLoanAmount(amount) {
   ) * 5000000;
 }
 
-
-// =========================================================
-// محاسبه بهترین ترکیب کوپه
-// =========================================================
-
 function getCompartmentPlan(passengers) {
-
   passengers = Number(passengers || 0);
 
   let best = null;
@@ -39,13 +22,11 @@ function getCompartmentPlan(passengers) {
     six <= Math.ceil(passengers / 6) + 2;
     six++
   ) {
-
     for (
       let four = 0;
       four <= Math.ceil(passengers / 4) + 2;
       four++
     ) {
-
       const capacity =
         six * 6 +
         four * 4;
@@ -80,21 +61,40 @@ function getCompartmentPlan(passengers) {
       ...Array(best.four).fill("۴ تخته"),
       ...Array(best.six).fill("۶ تخته")
     ],
-
     capacity: best.capacity,
     emptyBerths: best.emptyBerths,
-
     fourBerth: best.four,
     sixBerth: best.six
   };
 }
 
+function getSelectedTrain(route, trainId) {
 
-// =========================================================
-// قیمت بلیط
-// =========================================================
+  const trains =
+    CONFIG.RAIL.TICKET_PRICES[route]?.TRAINS || [];
 
-function getTicketPrice(route, type) {
+  const train =
+    trains.find(
+      x => String(x.id) === String(trainId)
+    );
+
+  if (!train) {
+    throw new Error(
+      "قطار انتخاب‌شده پیدا نشد."
+    );
+  }
+
+  return train;
+}
+
+function getTicketPrice(route, type, trainId) {
+
+  if (trainId) {
+    return getSelectedTrain(
+      route,
+      trainId
+    ).price;
+  }
 
   const r =
     CONFIG.RAIL.TICKET_PRICES[route];
@@ -105,24 +105,22 @@ function getTicketPrice(route, type) {
     );
   }
 
-  const p =
-    type === "4"
-      ? r.FOUR_BERTH?.price
-      : r.SIX_BERTH?.price;
+  const train =
+    (r.TRAINS || []).find(
+      x =>
+        type === "4"
+          ? String(x.berthType).includes("۴ تخته")
+          : String(x.berthType).includes("۶ تخته")
+    );
 
-  if (!p) {
+  if (!train) {
     throw new Error(
-      "قیمت کوپه برای این مسیر ثبت نشده است."
+      "قطار برای این نوع کوپه پیدا نشد."
     );
   }
 
-  return p;
+  return train.price;
 }
-
-
-// =========================================================
-// محاسبه تور ریلی
-// =========================================================
 
 function calculateRailTour(data) {
 
@@ -151,16 +149,8 @@ function calculateRailTour(data) {
       data.childHotelPercent ?? 50
     );
 
-  const privateCompartment =
-    Boolean(data.privateCompartment);
-
   const paymentType =
     data.paymentType || "cash";
-
-
-  // -------------------------------------------------------
-  // اعتبارسنجی
-  // -------------------------------------------------------
 
   if (totalPassengers <= 0) {
     throw new Error(
@@ -180,10 +170,6 @@ function calculateRailTour(data) {
     );
   }
 
-
-  const issue =
-    CONFIG.RAIL.TICKET_ISSUE_FEE;
-
   const routeConfig =
     CONFIG.RAIL.TICKET_PRICES[route];
 
@@ -193,161 +179,76 @@ function calculateRailTour(data) {
     );
   }
 
-
-  // -------------------------------------------------------
-  // محاسبه قطار
-  // -------------------------------------------------------
-
-  let trainTotal = 0;
-
-  let adultTrain = 0;
-
-  let childTrain = 0;
-
-  let trainDetails = [];
-
-  let compartmentPlan = null;
-
-
-  // -------------------------------------------------------
-  // کوپه خصوصی
-  // -------------------------------------------------------
-
-  if (privateCompartment) {
-
-    compartmentPlan =
-      getCompartmentPlan(
-        totalPassengers
-      );
-
-
-    // کوپه ۴ تخته
-    if (compartmentPlan.fourBerth) {
-
-      const price =
-        getTicketPrice(
+  const selectedTrain =
+    data.trainId
+      ? getSelectedTrain(
           route,
-          "4"
+          data.trainId
+        )
+      : null;
+
+  const ticketPrice =
+    selectedTrain
+      ? selectedTrain.price
+      : getTicketPrice(
+          route,
+          data.berthType === "۶ تخته"
+            ? "6"
+            : "4"
         );
 
-      const roundTrip =
-        (price + issue) * 2;
+  const adultRoundTrip =
+    (
+      ticketPrice +
+      CONFIG.RAIL.TICKET_ISSUE_FEE
+    ) * 2;
 
-      const cost =
-        roundTrip *
-        4 *
-        compartmentPlan.fourBerth;
-
-      trainTotal += cost;
-
-      trainDetails.push({
-        type: "۴ تخته",
-        count:
-          compartmentPlan.fourBerth,
-        price,
-        capacity: 4,
-        capacityCost: cost
-      });
-    }
-
-
-    // کوپه ۶ تخته
-    if (compartmentPlan.sixBerth) {
-
-      const price =
-        getTicketPrice(
-          route,
-          "6"
-        );
-
-      const roundTrip =
-        (price + issue) * 2;
-
-      const cost =
-        roundTrip *
-        6 *
-        compartmentPlan.sixBerth;
-
-      trainTotal += cost;
-
-      trainDetails.push({
-        type: "۶ تخته",
-        count:
-          compartmentPlan.sixBerth,
-        price,
-        capacity: 6,
-        capacityCost: cost
-      });
-    }
-
-
-    const perPerson =
-      trainTotal /
-      totalPassengers;
-
-    adultTrain =
-      perPerson;
-
-    childTrain =
-      perPerson;
-
-  }
-
-  // -------------------------------------------------------
-  // حالت عادی
-  // -------------------------------------------------------
-
-  else {
-
-    const ticketPrice =
-      Math.max(
-        routeConfig.FOUR_BERTH?.price || 0,
-        routeConfig.SIX_BERTH?.price || 0
-      );
-
-
-    const adultRoundTrip =
-      (ticketPrice + issue) * 2;
-
-
-    const childRoundTrip =
-      (
-        ticketPrice *
+  const childRoundTrip =
+    (
+      ticketPrice *
         CONFIG.RAIL.CHILD_TICKET_PERCENT /
         100 +
-        issue
-      ) * 2;
+      CONFIG.RAIL.TICKET_ISSUE_FEE
+    ) * 2;
 
+  const adultTrain =
+    adultRoundTrip;
 
-    adultTrain =
-      adultRoundTrip;
+  const childTrain =
+    childRoundTrip;
 
-    childTrain =
-      childRoundTrip;
+  const trainTotal =
+    adults * adultTrain +
+    children * childTrain;
 
+  const trainDetails = [
+    {
+      type:
+        selectedTrain?.berthType ||
+        data.berthType ||
+        "عادی",
 
-    trainTotal =
-      adults * adultTrain +
-      children * childTrain;
+      trainName:
+        selectedTrain?.name ||
+        data.trainName ||
+        "",
 
+      departure:
+        selectedTrain?.departure ||
+        "",
 
-    trainDetails.push({
-      type: "عادی",
+      arrival:
+        selectedTrain?.arrival ||
+        "",
+
       adultRoundTrip,
       childRoundTrip,
       ticketPrice
-    });
-  }
-
-
-  // -------------------------------------------------------
-  // محاسبه هتل
-  // -------------------------------------------------------
+    }
+  ];
 
   const adultHotel =
-    hotelPrice *
-    nights;
-
+    hotelPrice * nights;
 
   const childHotel =
     hotelPrice *
@@ -355,66 +256,32 @@ function calculateRailTour(data) {
     100 *
     nights;
 
-
   const adultHotelTotal =
-    adults *
-    adultHotel;
-
+    adults * adultHotel;
 
   const childHotelTotal =
-    children *
-    childHotel;
-
+    children * childHotel;
 
   const hotelTotal =
     adultHotelTotal +
     childHotelTotal;
 
-
-  // -------------------------------------------------------
-  // خرید خالص
-  // -------------------------------------------------------
-
   const netPurchaseTotal =
     trainTotal +
     hotelTotal;
-
-
-  // =======================================================
-  // سود
-  //
-  // نقدی       = ۳ میلیون برای هر نفر
-  // طرح الماس  = ۵ میلیون برای هر نفر
-  // =======================================================
 
   const profitPerPerson =
     paymentType === "loan"
       ? 5000000
       : 3000000;
 
-
   const totalProfit =
     profitPerPerson *
     totalPassengers;
 
-
-  // -------------------------------------------------------
-  // قیمت نهایی فروش
-  // -------------------------------------------------------
-
   const finalPrice =
     netPurchaseTotal +
     totalProfit;
-
-
-  // =======================================================
-  // طرح الماس
-  //
-  // سهم مشتری = ۴۰٪
-  // طرح الماس = ۶۰٪
-  //
-  // مبلغ طرح الماس به نزدیک‌ترین ۵ میلیون گرد می‌شود.
-  // =======================================================
 
   const loanAmount =
     paymentType === "loan"
@@ -423,346 +290,156 @@ function calculateRailTour(data) {
         )
       : 0;
 
-
   const customerCash =
     paymentType === "loan"
-      ? finalPrice * 0.40
+      ? finalPrice - loanAmount
       : 0;
 
-
   return {
-
     route,
-
     adults,
-
     children,
-
     totalPassengers,
-
     nights,
-
     hotelPrice,
-
     childHotelPercent,
-
-    privateCompartment,
-
-    compartmentPlan,
-
+    privateCompartment: false,
+    compartmentPlan: null,
     trainDetails,
-
     trainTotal,
-
     adultTrain,
-
     childTrain,
-
     adultHotel,
-
     childHotel,
-
     adultHotelTotal,
-
     childHotelTotal,
-
     hotelTotal,
-
     netPurchaseTotal,
-
     profitPerPerson,
-
     totalProfit,
-
     finalPrice,
-
     paymentType,
-
     loanAmount,
-
     customerCash
   };
 }
-
-
-// =========================================================
-// نمایش محاسبه تور ریلی
-// =========================================================
 
 function formatRailCalculation(r) {
 
   const routeName =
     CONFIG.RAIL.TICKET_PRICES[
       r.route
-    ]?.name ||
-    r.route;
-
+    ]?.name || r.route;
 
   const t =
     r.trainDetails[0];
-
 
   let text =
     "🧮 محاسبه داخلی تور ریلی\n" +
     "━━━━━━━━━━━━━━━━━━\n";
 
-
   text +=
     `🚆 مسیر: ${routeName}\n`;
 
-
-  if (r.privateCompartment) {
-
+  if (t.trainName) {
     text +=
-      `🛏️ نوع کوپه: ${
-        r.compartmentPlan.compartments.join(
-          " + "
-        )
-      }\n`;
+      `🚆 قطار: ${t.trainName}\n`;
   }
 
+  if (t.type) {
+    text +=
+      `🛏️ ${t.type}\n`;
+  }
+
+  if (
+    t.departure ||
+    t.arrival
+  ) {
+    text +=
+      `🕐 حرکت: ${t.departure} → ${t.arrival}\n`;
+  }
 
   text +=
-    `👨 بزرگسال: ${
-      formatMoney(r.adults)
-    } نفر\n`;
-
+    `👨 بزرگسال: ${formatMoney(r.adults)} نفر\n`;
 
   text +=
-    `👶 کودک ۲ تا ۱۲ سال: ${
-      formatMoney(r.children)
-    } نفر\n`;
-
+    `👶 کودک ۲ تا ۱۲ سال: ${formatMoney(r.children)} نفر\n`;
 
   text +=
-    `👥 مجموع مسافران: ${
-      formatMoney(r.totalPassengers)
-    } نفر\n`;
-
+    `👥 مجموع مسافران: ${formatMoney(r.totalPassengers)} نفر\n`;
 
   text +=
     "━━━━━━━━━━━━━━━━━━\n" +
     "🚆 محاسبه قطار\n";
 
-
-  // -------------------------------------------------------
-  // قطار عادی
-  // -------------------------------------------------------
-
-  if (!r.privateCompartment) {
-
-    text +=
-      `قیمت بلیط: ${
-        formatMoney(t.ticketPrice)
-      } تومان\n`;
-
-
-    text +=
-      `هزینه صدور هر بلیط یک‌طرفه: ${
-        formatMoney(
-          CONFIG.RAIL.TICKET_ISSUE_FEE
-        )
-      } تومان\n`;
-
-
-    text +=
-      `بلیط رفت و برگشت بزرگسال: ${
-        formatMoney(
-          t.adultRoundTrip
-        )
-      } تومان\n`;
-
-
-    text +=
-      `بلیط رفت و برگشت کودک: ${
-        formatMoney(
-          t.childRoundTrip
-        )
-      } تومان\n`;
-  }
-
-
-  // -------------------------------------------------------
-  // کوپه خصوصی
-  // -------------------------------------------------------
-
-  else {
-
-    text +=
-      `قیمت بلیط: ${
-        formatMoney(t.price)
-      } تومان\n`;
-
-
-    text +=
-      `هزینه صدور هر بلیط یک‌طرفه: ${
-        formatMoney(
-          CONFIG.RAIL.TICKET_ISSUE_FEE
-        )
-      } تومان\n`;
-
-
-    text +=
-      "🚪 کوپه خصوصی: بله\n";
-
-
-    text +=
-      `🛏️ ظرفیت خریداری‌شده: ${
-        formatMoney(
-          r.compartmentPlan.capacity
-        )
-      } تخت\n`;
-
-
-    text +=
-      `🛏️ تخت خالی: ${
-        formatMoney(
-          r.compartmentPlan.emptyBerths
-        )
-      } عدد\n`;
-  }
-
-
-  if (!r.privateCompartment) {
-
-    text +=
-      "🚪 کوپه خصوصی: خیر\n";
-  }
-
+  text +=
+    `قیمت بلیط: ${formatMoney(t.ticketPrice)} تومان\n`;
 
   text +=
-    `🚆 مجموع قطار: ${
-      formatMoney(r.trainTotal)
-    } تومان\n`;
+    `هزینه صدور هر بلیط یک‌طرفه: ${formatMoney(CONFIG.RAIL.TICKET_ISSUE_FEE)} تومان\n`;
 
+  text +=
+    `بلیط رفت و برگشت بزرگسال: ${formatMoney(t.adultRoundTrip)} تومان\n`;
 
-  // -------------------------------------------------------
-  // هتل
-  // -------------------------------------------------------
+  text +=
+    `بلیط رفت و برگشت کودک: ${formatMoney(t.childRoundTrip)} تومان\n`;
+
+  text +=
+    `🚆 مجموع قطار: ${formatMoney(r.trainTotal)} تومان\n`;
 
   text +=
     "━━━━━━━━━━━━━━━━━━\n" +
     "🏨 محاسبه هتل\n";
 
+  text +=
+    `قیمت هتل هر نفر / هر شب: ${formatMoney(r.hotelPrice)} تومان\n`;
 
   text +=
-    `قیمت هتل هر نفر / هر شب: ${
-      formatMoney(r.hotelPrice)
-    } تومان\n`;
-
+    `تعداد شب: ${formatMoney(r.nights)}\n`;
 
   text +=
-    `تعداد شب: ${
-      formatMoney(r.nights)
-    }\n`;
-
+    `درصد هتل کودک: ${formatMoney(r.childHotelPercent)}٪\n`;
 
   text +=
-    `درصد هتل کودک: ${
-      formatMoney(
-        r.childHotelPercent
-      )
-    }٪\n`;
-
+    `هتل هر بزرگسال: ${formatMoney(r.adultHotel)} تومان\n`;
 
   text +=
-    `هتل هر بزرگسال: ${
-      formatMoney(r.adultHotel)
-    } تومان\n`;
-
+    `هتل هر کودک: ${formatMoney(r.childHotel)} تومان\n`;
 
   text +=
-    `هتل هر کودک: ${
-      formatMoney(r.childHotel)
-    } تومان\n`;
-
-
-  text +=
-    `🏨 مجموع هتل: ${
-      formatMoney(r.hotelTotal)
-    } تومان\n`;
-
-
-  // -------------------------------------------------------
-  // جمع نهایی
-  // -------------------------------------------------------
+    `🏨 مجموع هتل: ${formatMoney(r.hotelTotal)} تومان\n`;
 
   text +=
     "━━━━━━━━━━━━━━━━━━\n";
 
+  text +=
+    `💰 خرید خالص: ${formatMoney(r.netPurchaseTotal)} تومان\n`;
 
   text +=
-    `💰 خرید خالص: ${
-      formatMoney(
-        r.netPurchaseTotal
-      )
-    } تومان\n`;
-
+    `📈 سود هر نفر: ${formatMoney(r.profitPerPerson)} تومان\n`;
 
   text +=
-    `📈 سود هر نفر: ${
-      formatMoney(
-        r.profitPerPerson
-      )
-    } تومان\n`;
-
-
-  text +=
-    `📈 مجموع سود: ${
-      formatMoney(
-        r.totalProfit
-      )
-    } تومان\n`;
-
+    `📈 مجموع سود: ${formatMoney(r.totalProfit)} تومان\n`;
 
   text +=
     "━━━━━━━━━━━━━━━━━━\n";
 
-
   text +=
-    `💵 قیمت نهایی فروش: ${
-      formatMoney(
-        r.finalPrice
-      )
-    } تومان\n`;
-
+    `💵 قیمت نهایی فروش: ${formatMoney(r.finalPrice)} تومان\n`;
 
   text +=
     "━━━━━━━━━━━━━━━━━━";
 
-
-  // =======================================================
-  // نمایش طرح الماس
-  // =======================================================
-
-  if (
-    r.paymentType === "loan"
-  ) {
+  if (r.paymentType === "loan") {
 
     text +=
-      "\n\n" +
-      "💎 طرح الماس شهر بهشت\n" +
-      "━━━━━━━━━━━━━━━━━━\n" +
-      `💵 سهم پرداخت مشتری (۴۰٪): ${
-        formatMoney(
-          r.customerCash
-        )
-      } تومان\n` +
-      `💳 مبلغ طرح الماس (۶۰٪): ${
-        formatMoney(
-          r.loanAmount
-        )
-      } تومان`;
+      "\n\n💎 طرح الماس\n" +
+      `💵 سهم پرداخت مشتری (۴۰٪): ${formatMoney(r.customerCash)} تومان\n` +
+      `💳 مبلغ طرح الماس (۶۰٪): ${formatMoney(r.loanAmount)} تومان`;
   }
-
 
   return text;
 }
-
-
-// =========================================================
-// محاسبه دستی تور
-// =========================================================
 
 function calculateManualTour(data) {
 
@@ -785,9 +462,7 @@ function calculateManualTour(data) {
     Number(data.hotelAdult || 0);
 
   const childPercent =
-    Number(
-      data.childPercent ?? 50
-    );
+    Number(data.childPercent ?? 50);
 
   const busRental =
     Number(data.busRental || 0);
@@ -798,7 +473,6 @@ function calculateManualTour(data) {
   const manualProfit =
     Number(data.manualProfit || 0);
 
-
   if (
     totalPassengers <= 0 ||
     nights <= 0
@@ -808,23 +482,19 @@ function calculateManualTour(data) {
     );
   }
 
-
   const childTicket =
     ticketAdult *
     childPercent /
     100;
-
 
   const childHotel =
     hotelAdult *
     childPercent /
     100;
 
-
   const ticketTotal =
     adults * ticketAdult +
     children * childTicket;
-
 
   const hotelTotal =
     nights *
@@ -833,26 +503,21 @@ function calculateManualTour(data) {
       children * childHotel
     );
 
-
   const netPurchaseTotal =
     ticketTotal +
     hotelTotal +
     busRental;
 
-
   const profitPerPerson =
     manualProfit;
-
 
   const totalProfit =
     profitPerPerson *
     totalPassengers;
 
-
   const finalPrice =
     netPurchaseTotal +
     totalProfit;
-
 
   const loanAmount =
     paymentType === "loan"
@@ -861,168 +526,68 @@ function calculateManualTour(data) {
         )
       : 0;
 
-
   const customerCash =
     paymentType === "loan"
-      ? finalPrice * 0.4
+      ? finalPrice - loanAmount
       : 0;
 
-
   return {
-
     ...data,
-
     adults,
-
     children,
-
     nights,
-
     totalPassengers,
-
     ticketAdult,
-
     childTicket,
-
     hotelAdult,
-
     childHotel,
-
     busRental,
-
     ticketTotal,
-
     hotelTotal,
-
     netPurchaseTotal,
-
     profitPerPerson,
-
     totalProfit,
-
     finalPrice,
-
     paymentType,
-
     loanAmount,
-
     customerCash
   };
 }
 
-
-// =========================================================
-// نمایش محاسبه دستی
-// =========================================================
-
 function formatManualCalculation(r) {
 
   return (
-
     `🧮 محاسبه داخلی مدیر\n` +
-
     `━━━━━━━━━━━━━━━━━━\n` +
-
-    `👨 بزرگسال: ${
-      formatMoney(r.adults)
-    } نفر\n` +
-
-    `👶 کودک: ${
-      formatMoney(r.children)
-    } نفر\n` +
-
-    `🌙 تعداد شب: ${
-      formatMoney(r.nights)
-    }\n` +
-
+    `👨 بزرگسال: ${formatMoney(r.adults)} نفر\n` +
+    `👶 کودک: ${formatMoney(r.children)} نفر\n` +
+    `🌙 تعداد شب: ${formatMoney(r.nights)}\n` +
     `━━━━━━━━━━━━━━━━━━\n` +
-
-    `🎫 بلیت بزرگسال: ${
-      formatMoney(r.ticketAdult)
-    } تومان\n` +
-
-    `🎫 بلیت کودک: ${
-      formatMoney(r.childTicket)
-    } تومان\n` +
-
-    `🏨 هتل بزرگسال/شب: ${
-      formatMoney(r.hotelAdult)
-    } تومان\n` +
-
-    `🏨 هتل کودک/شب: ${
-      formatMoney(r.childHotel)
-    } تومان\n` +
-
-    `💰 خرید خالص: ${
-      formatMoney(
-        r.netPurchaseTotal
-      )
-    } تومان\n` +
-
+    `🎫 بلیت بزرگسال: ${formatMoney(r.ticketAdult)} تومان\n` +
+    `🎫 بلیت کودک: ${formatMoney(r.childTicket)} تومان\n` +
+    `🏨 هتل بزرگسال/شب: ${formatMoney(r.hotelAdult)} تومان\n` +
+    `🏨 هتل کودک/شب: ${formatMoney(r.childHotel)} تومان\n` +
+    `💰 خرید خالص: ${formatMoney(r.netPurchaseTotal)} تومان\n` +
     `━━━━━━━━━━━━━━━━━━\n` +
-
-    `📈 سود هر نفر: ${
-      formatMoney(
-        r.profitPerPerson
-      )
-    } تومان\n` +
-
-    `📈 سود کل: ${
-      formatMoney(
-        r.totalProfit
-      )
-    } تومان\n` +
-
-    `💵 قیمت نهایی: ${
-      formatMoney(
-        r.finalPrice
-      )
-    } تومان` +
-
+    `📈 سود هر نفر: ${formatMoney(r.profitPerPerson)} تومان\n` +
+    `📈 سود کل: ${formatMoney(r.totalProfit)} تومان\n` +
+    `💵 قیمت نهایی: ${formatMoney(r.finalPrice)} تومان` +
     (
-
       r.paymentType === "loan"
-
-        ? `\n\n💎 طرح الماس شهر بهشت\n` +
-
-          `💵 سهم پرداخت مشتری (۴۰٪): ${
-            formatMoney(
-              r.customerCash
-            )
-          } تومان\n` +
-
-          `💳 مبلغ طرح الماس (۶۰٪): ${
-            formatMoney(
-              r.loanAmount
-            )
-          } تومان`
-
+        ? `\n\n💎 طرح الماس\n` +
+          `💵 سهم پرداخت مشتری (۴۰٪): ${formatMoney(r.customerCash)} تومان\n` +
+          `💳 مبلغ طرح الماس (۶۰٪): ${formatMoney(r.loanAmount)} تومان`
         : ""
-
     )
-
   );
 }
 
-
-// =========================================================
-// EXPORT
-// =========================================================
-
 module.exports = {
-
   calculateRailTour,
-
   formatRailCalculation,
-
   calculateManualTour,
-
   formatManualCalculation,
-
   getCompartmentPlan,
-
   formatMoney,
-
   roundLoanAmount
-
 };

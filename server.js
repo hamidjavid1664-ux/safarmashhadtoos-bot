@@ -1126,6 +1126,23 @@ async function submitRequest(
   const req =
     result.rows[0];
 
+  /*
+   * نوع تور را یکدست می‌کنیم
+   */
+  const tourType =
+    String(
+      data.tourType || ""
+    )
+      .trim()
+      .toUpperCase();
+
+  /*
+   * تشخیص مطمئن تور هوایی
+   */
+  const isAir =
+    tourType === "AIR" ||
+    tourType.includes("AIR");
+
   let managerText =
 `📥 درخواست جدید سفر مشهد توس
 
@@ -1198,8 +1215,11 @@ ${data.nationalCode || "-"}`;
     ]
   ];
 
+  /*
+   * محاسبه تور ریلی
+   */
   if (
-    data.tourType === "RAIL"
+    tourType === "RAIL"
   ) {
     buttons.push([
       {
@@ -1210,9 +1230,10 @@ ${data.nationalCode || "-"}`;
     ]);
   }
 
-  if (
-    data.tourType === "AIR"
-  ) {
+  /*
+   * محاسبه تور هوایی
+   */
+  if (isAir) {
     buttons.push([
       {
         text: "✈️ محاسبه این درخواست هوایی",
@@ -1222,8 +1243,11 @@ ${data.nationalCode || "-"}`;
     ]);
   }
 
+  /*
+   * محاسبه فقط هتل
+   */
   if (
-    data.tourType === "HOTEL"
+    tourType === "HOTEL"
   ) {
     buttons.push([
       {
@@ -1238,7 +1262,8 @@ ${data.nationalCode || "-"}`;
     CONFIG.ADMIN_CHAT_ID,
     managerText,
     {
-      inline_keyboard: buttons
+      inline_keyboard:
+        buttons
     }
   );
 
@@ -1259,7 +1284,6 @@ ${requestCode}
 
   return req;
 }
-
 /*
  * =========================================================
  * تأیید درخواست توسط مدیر

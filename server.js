@@ -3217,15 +3217,25 @@ ${CONFIG.CHANNEL_URL}`,
   }
 
   /*
-   * دستور ریلی
+   * دستور محاسبات مدیر
+   * /railcalc برای نمایش همه انواع محاسبه
    */
   if (
     text === "/railcalc" &&
     isAdmin(chatId)
   ) {
-    await startRailCalc(
-      chatId
+    await saveSession(
+      chatId,
+      "ADMIN_CALC",
+      {}
     );
+
+    await sendMessage(
+      chatId,
+      "🧮 محاسبات مدیر\n\nنوع محاسبه را انتخاب کنید:",
+      managerCalcMenu()
+    );
+
     return;
   }
 

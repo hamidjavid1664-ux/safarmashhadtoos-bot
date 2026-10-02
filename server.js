@@ -532,7 +532,7 @@ function sendDiamondPlan(chatId) {
         [
           {
             text: "📲 نصب کیوبانک مهر",
-            url: CONFIG.DIAMOND_QBANK_URL
+            url: "https://mehr-apps.hot.ir-central1.arvanstorage.ir/Qbank_8.0.5.apk?versionId="
           }
         ],
         [
@@ -3478,14 +3478,24 @@ async function handleCallback(
       return;
     }
 
+    // کاروان‌ها فعلاً فعال نیستند
+    if (
+      data === "TOUR_CARAVAN_BUS" ||
+      data === "TOUR_CARAVAN_RAIL"
+    ) {
+      await clearSession(chatId);
+      await sendMessage(
+        chatId,
+        "ℹ️ جهت اطلاعات بیشتر درباره کاروان اتوبوسی و کاروان ریلی، لطفاً با مدیر تماس بگیرید.\n\n📞 ۰۹۱۷۷۷۰۰۹۶۱",
+        mainKeyboard()
+      );
+      return;
+    }
+
     const map = {
       TOUR_AIR: "AIR",
       TOUR_RAIL: "RAIL",
-      TOUR_BUS: "BUS",
-      TOUR_CARAVAN_BUS:
-        "CARAVAN_BUS",
-      TOUR_CARAVAN_RAIL:
-        "CARAVAN_RAIL"
+      TOUR_BUS: "BUS"
     };
 
     if (map[data]) {

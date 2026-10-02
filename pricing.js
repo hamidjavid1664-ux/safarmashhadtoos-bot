@@ -78,9 +78,20 @@ function calculateRailTour(data) {
     adultTrain = perPerson;
     childTrain = perPerson;
   } else {
-    const ticketPrice = Math.max(routeConfig.FOUR_BERTH?.price || 0, routeConfig.SIX_BERTH?.price || 0);
+    const ticketPrice = Number(
+      data.trainPrice ||
+      Math.max(routeConfig.FOUR_BERTH?.price || 0, routeConfig.SIX_BERTH?.price || 0)
+    );
+
+    if (ticketPrice <= 0) {
+      throw new Error("قیمت قطار انتخاب‌شده معتبر نیست.");
+    }
+
+    // فرمول قطار:
+    // (قیمت بلیت یک‌طرفه + ۲۰۰٬۰۰۰ تومان هزینه صدور) × ۲ رفت و برگشت
     const adultRoundTrip = (ticketPrice + issue) * 2;
-    const childRoundTrip = (ticketPrice * CONFIG.RAIL.CHILD_TICKET_PERCENT / 100 + issue) * 2;
+    const childRoundTrip =
+      (ticketPrice * CONFIG.RAIL.CHILD_TICKET_PERCENT / 100 + issue) * 2;
     adultTrain = adultRoundTrip;
     childTrain = childRoundTrip;
     trainTotal = adults * adultTrain + children * childTrain;

@@ -2536,6 +2536,35 @@ async function manualText(
       return true;
     }
 
+    /*
+     * تور اتوبوسی:
+     * بلیت رفت و برگشت هر صندلی ثابتاً ۴٬۰۰۰٬۰۰۰ تومان است
+     * (۲٬۰۰۰٬۰۰۰ تومان هر مسیر). کودک ۳ تا ۵ سال نیز صندلی کامل دارد.
+     */
+    if (d.type === "BUS") {
+      await saveSession(
+        chatId,
+        "MAN_HOTEL",
+        {
+          ...d,
+          nights: v,
+          ticketAdult: 4000000,
+          childPercent: 100,
+          busRental: 0
+        }
+      );
+
+      await sendMessage(
+        chatId,
+        "🚌 تور اتوبوسی\n\n" +
+          "🎫 بلیت رفت و برگشت هر صندلی: ۴٬۰۰۰٬۰۰۰ تومان\n" +
+          "👶 کودک ۳ تا ۵ سال نیز بلیت کامل محاسبه می‌شود.\n\n" +
+          "🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:"
+      );
+
+      return true;
+    }
+
     await saveSession(
       chatId,
       d.type === "AIR"

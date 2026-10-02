@@ -1466,6 +1466,19 @@ async function submitRequest(chatId) {
   }
 
   /*
+   * محاسبه تور اتوبوسی
+   */
+  if (d.tourType === "BUS") {
+    buttons.push([
+      {
+        text: "🚌 محاسبه این درخواست اتوبوسی",
+        callback_data:
+          `CALC_BUS_REQUEST:${code}`
+      }
+    ]);
+  }
+
+  /*
    * محاسبه فقط هتل
    */
   if (d.tourType === "HOTEL") {
@@ -2594,6 +2607,7 @@ async function manualText(
     });
 
     await saveSession(chatId, "ADMIN_CALC", {
+      ...d,
       calculation: r
     });
 
@@ -4169,6 +4183,55 @@ ${e.message}`
     await sendMessage(
       chatId,
       `✈️ محاسبه تور هوایی\n\n🆔 درخواست: ${code}\n👤 متقاضی: ${rq.applicant_name || ""}\n👨 بزرگسال: ${Number(p.adults || 0)} نفر\n👶 کودک: ${Number(p.children || 0)} نفر\n🌙 تعداد شب: ${Number(p.nights || 0)}\n\n✈️ مبلغ بلیت رفت هر بزرگسال را وارد کنید:`
+    );
+
+    return;
+  }
+
+  /*
+   * =======================================================
+   * اتصال درخواست اتوبوسی به محاسبه
+   * =======================================================
+   */
+
+  if (
+    data.startsWith("CALC_BUS_REQUEST:") &&
+    isAdmin(chatId)
+  ) {
+    const code = data.substring("CALC_BUS_REQUEST:".length);
+
+    const rr = await pool.query(
+      "SELECT * FROM requests WHERE request_code=$1",
+      [code]
+    );
+
+    if (!rr.rows.length) {
+      await sendMessage(chatId, "❌ درخواست پیدا نشد.");
+      return;
+    }
+
+    const rq = rr.rows[0];
+    const p = rq.payload || {};
+
+    await saveSession(chatId, "MAN_BUS_HOTEL", {
+      type: "BUS",
+      requestCode: code,
+      applicantName: rq.applicant_name || "",
+      phone: rq.phone || "",
+      nationalCode: p.nationalCode || p.national_code || rq.national_code || "",
+      adults: Number(p.adults || 0),
+      children: Number(p.children || 0),
+      nights: Number(p.nights || 0),
+      paymentType: p.paymentType || rq.payment_type || "cash",
+      busTicketRoundTrip: 4000000,
+      ticketAdult: 4000000,
+      childPercent: 100,
+      childHotelPercent: 50
+    });
+
+    await sendMessage(
+      chatId,
+      `🚌 محاسبه درخواست تور اتوبوسی\n\n🆔 درخواست: ${code}\n👤 متقاضی: ${rq.applicant_name || ""}\n👨 بزرگسال: ${Number(p.adults || 0)} نفر\n👶 کودک: ${Number(p.children || 0)} نفر\n🌙 تعداد شب: ${Number(p.nights || 0)}\n🎫 بلیت رفت و برگشت هر صندلی: ۴٬۰۰۰٬۰۰۰ تومان\n👶 کودک ۳ تا ۵ سال: بلیت کامل\n\n🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:`
     );
 
     return;

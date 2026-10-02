@@ -299,8 +299,22 @@ function calculateManualTour(data) {
   const adults = Math.floor(toNumber(data.adults));
   const children = Math.floor(toNumber(data.children));
   const nights = Math.floor(toNumber(data.nights));
-  const ticketAdult = toNumber(data.ticketAdult);
-  const childPercent = toNumber(data.childPercent ?? 50);
+
+  // برای تور هوایی قیمت رفت و برگشت بزرگسال و کودک جداگانه وارد می‌شود.
+  const ticketAdultOutbound = toNumber(data.ticketAdultOutbound ?? data.ticketAdult);
+  const ticketAdultReturn = toNumber(data.ticketAdultReturn ?? 0);
+  const ticketChildOutbound = toNumber(data.ticketChildOutbound ?? 0);
+  const ticketChildReturn = toNumber(data.ticketChildReturn ?? 0);
+
+  const ticketAdult = type === "AIR"
+    ? ticketAdultOutbound + ticketAdultReturn
+    : toNumber(data.ticketAdult);
+
+  const childPercent = toNumber(data.childPercent ?? 100);
+  const childTicket = type === "AIR"
+    ? ticketChildOutbound + ticketChildReturn
+    : ticketAdult * childPercent / 100;
+
   const hotelAdult = toNumber(data.hotelAdult || SETTINGS.HOTEL_PRICE_PER_NIGHT);
   const busRental = toNumber(data.busRental);
   const manualProfit = toNumber(data.manualProfit);
@@ -310,9 +324,10 @@ function calculateManualTour(data) {
   if (totalPassengers <= 0) throw new Error("تعداد مسافران باید بیشتر از صفر باشد.");
   if (nights <= 0) throw new Error("تعداد شب اقامت باید بیشتر از صفر باشد.");
 
-  const childTicket = ticketAdult * childPercent / 100;
   const childHotel = hotelAdult * SETTINGS.HOTEL_CHILD_PERCENT / 100;
-  const ticketTotal = adults * ticketAdult + children * childTicket;
+  const adultTicketTotal = adults * ticketAdult;
+  const childTicketTotal = children * childTicket;
+  const ticketTotal = adultTicketTotal + childTicketTotal;
   const hotelTotal = nights * (adults * hotelAdult + children * childHotel);
   const netPurchaseTotal = ticketTotal + hotelTotal + busRental;
 
@@ -335,11 +350,32 @@ function calculateManualTour(data) {
   }
 
   return {
-    type, adults, children, nights, totalPassengers,
-    ticketAdult, childTicket, hotelAdult, childHotel,
-    busRental, ticketTotal, hotelTotal, netPurchaseTotal,
-    profitPerPerson, totalProfit, finalPrice,
-    paymentType, loanAmount, customerCash
+    type,
+    adults,
+    children,
+    nights,
+    totalPassengers,
+    ticketAdult,
+    ticketAdultOutbound,
+    ticketAdultReturn,
+    childTicket,
+    ticketChildOutbound,
+    ticketChildReturn,
+    adultTicketTotal,
+    childTicketTotal,
+    childPercent,
+    hotelAdult,
+    childHotel,
+    busRental,
+    ticketTotal,
+    hotelTotal,
+    netPurchaseTotal,
+    profitPerPerson,
+    totalProfit,
+    finalPrice,
+    paymentType,
+    loanAmount,
+    customerCash
   };
 }
 
@@ -360,8 +396,29 @@ function formatManualCalculation(result) {
   text += `👥 مجموع: ${formatNumber(result.totalPassengers)} نفر\n`;
   text += `🌙 اقامت: ${formatNumber(result.nights)} شب\n\n`;
   text += "━━━━━━━━━━━━━━\n💰 هزینه‌ها\n\n";
-  text += `🎫 بلیت هر بزرگسال: ${formatMoney(result.ticketAdult)}\n`;
-  text += `🎫 بلیت هر کودک: ${formatMoney(result.childTicket)}\n`;
+  if (result.type === "AIR") {
+    text += `✈️ بلیت بزرگسال - رفت: ${formatMoney(result.ticketAdultOutbound)}
+`;
+    text += `✈️ بلیت بزرگسال - برگشت: ${formatMoney(result.ticketAdultReturn)}
+`;
+    text += `🎫 مجموع بلیت رفت‌وبرگشت هر بزرگسال: ${formatMoney(result.ticketAdult)}
+`;
+    text += `👶 بلیت کودک - رفت: ${formatMoney(result.ticketChildOutbound)}
+`;
+    text += `👶 بلیت کودک - برگشت: ${formatMoney(result.ticketChildReturn)}
+`;
+    text += `🎫 مجموع بلیت رفت‌وبرگشت هر کودک: ${formatMoney(result.childTicket)}
+`;
+    text += `💰 مجموع بلیت بزرگسالان: ${formatMoney(result.adultTicketTotal)}
+`;
+    text += `💰 مجموع بلیت کودکان: ${formatMoney(result.childTicketTotal)}
+`;
+  } else {
+    text += `🎫 بلیت هر بزرگسال: ${formatMoney(result.ticketAdult)}
+`;
+    text += `🎫 بلیت هر کودک: ${formatMoney(result.childTicket)}
+`;
+  }
   text += `🏨 هتل هر بزرگسال/شب: ${formatMoney(result.hotelAdult)}\n`;
   text += `🏨 هتل هر کودک/شب: ${formatMoney(result.childHotel)}\n`;
   if (result.busRental > 0) text += `🚌 اجاره اتوبوس: ${formatMoney(result.busRental)}\n`;

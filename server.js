@@ -2575,22 +2575,43 @@ async function manualText(
       return true;
     }
 
-    await saveSession(chatId, "MAN_BUS_PROFIT", {
+    const nextData = {
       ...d,
       hotelAdult: v,
       ticketAdult: 4000000,
       childPercent: 100,
       childHotelPercent: 50
-    });
+    };
 
-    await sendMessage(
-      chatId,
-      "📈 سود هر نفر را وارد کنید:\n\n💵 مبلغ سود نقدی یا سود طرح الماس را وارد کنید."
-    );
+    // اگر درخواست از طرف مشتری ثبت شده باشد، نوع پرداخت از خود درخواست می‌آید.
+    if (d.requestCode) {
+      if (d.paymentType === "loan") {
+        await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", nextData);
+        await sendMessage(
+          chatId,
+          "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
+        );
+      } else {
+        await saveSession(chatId, "MAN_BUS_PROFIT", nextData);
+        await sendMessage(
+          chatId,
+          "💵 سود هر نفر برای محاسبه نقدی را وارد کنید:"
+        );
+      }
+    } else {
+      await saveSession(chatId, "MAN_BUS_PAYMENT_SELECT", nextData);
+      await sendMessage(chatId, "💳 نوع پرداخت را انتخاب کنید:", {
+        inline_keyboard: [
+          [{text: "💵 نقدی", callback_data: "BUS_PAYMENT_CASH"}],
+          [{text: "💎 طرح الماس", callback_data: "BUS_PAYMENT_LOAN"}],
+          [{text: "🔙 خروج", callback_data: "ADMIN_CALC_EXIT"}]
+        ]
+      });
+    }
     return true;
   }
 
-  /* محاسبه اتوبوسی: سود */
+  /* محاسبه اتوبوسی: سود نقدی */
   if (d.type === "BUS" && s.state === "MAN_BUS_PROFIT") {
     if (v < 0) {
       await sendMessage(chatId, "❌ سود صحیح نیست.");
@@ -2613,7 +2634,37 @@ async function manualText(
 
     await sendMessage(
       chatId,
-      "🚌 نتیجه محاسبه تور اتوبوسی\n\n" + PRICING.formatManualCalculation(r),
+      "🚌 نتیجه محاسبه تور اتوبوسی\n💵 نوع پرداخت: نقدی\n\n" + PRICING.formatManualCalculation(r),
+      managerCalcMenu()
+    );
+    return true;
+  }
+
+  /* محاسبه اتوبوسی: سود طرح الماس */
+  if (d.type === "BUS" && s.state === "MAN_BUS_LOAN_PROFIT") {
+    if (v < 5000000 || v > 6000000) {
+      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد.");
+      return true;
+    }
+
+    const r = PRICING.calculateManualTour({
+      ...d,
+      ticketAdult: 4000000,
+      childPercent: 100,
+      childHotelPercent: 50,
+      manualProfit: v,
+      paymentType: "loan"
+    });
+
+    await saveSession(chatId, "ADMIN_CALC", {
+      ...d,
+      paymentType: "loan",
+      calculation: r
+    });
+
+    await sendMessage(
+      chatId,
+      "🚌 نتیجه محاسبه تور اتوبوسی\n💎 نوع پرداخت: طرح الماس\n\n" + PRICING.formatManualCalculation(r),
       managerCalcMenu()
     );
     return true;
@@ -4091,6 +4142,39 @@ async function handleCallback(
         chatId,
         `❌ خطا در محاسبه:
 ${e.message}`
+      );
+    }
+
+    return;
+  }
+
+  /*
+   * =======================================================
+   * پرداخت محاسبه دستی تور اتوبوسی
+   * =======================================================
+   */
+
+  if (
+    (data === "BUS_PAYMENT_CASH" ||
+      data === "BUS_PAYMENT_LOAN") &&
+    isAdmin(chatId)
+  ) {
+    const s = await getSession(chatId);
+
+    if (!s || s.state !== "MAN_BUS_PAYMENT_SELECT") {
+      return;
+    }
+
+    const d = s.data || {};
+
+    if (data === "BUS_PAYMENT_CASH") {
+      await saveSession(chatId, "MAN_BUS_PROFIT", d);
+      await sendMessage(chatId, "💵 سود هر نفر برای محاسبه نقدی را وارد کنید:");
+    } else {
+      await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", d);
+      await sendMessage(
+        chatId,
+        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
       );
     }
 

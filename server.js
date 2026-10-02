@@ -532,7 +532,7 @@ function sendDiamondPlan(chatId) {
         [
           {
             text: "📲 نصب کیوبانک مهر",
-            url: "https://qbank24.ir"
+            url: "https://qbank24.ir/downloads"
           }
         ],
         [

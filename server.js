@@ -48,54 +48,18 @@ function isAdmin(chatId) {
 function getRailTrains(route) {
   const r = String(route || "").toUpperCase();
 
-  // قطارهای واقعی ثبت‌شده برای محاسبه تور ریلی
   if (r === "AHVAZ") {
     return [
-      {
-        key: "AHVAZ_MAHTAB",
-        train: "مهتاب سیر",
-        stars: "۳ ستاره",
-        berth: "۶ تخته",
-        time: "۱۳:۲۰ → ۱۵:۲۵",
-        ticket: 1940000
-      },
-      {
-        key: "AHVAZ_OMID",
-        train: "امید رجا",
-        stars: "۴ ستاره",
-        berth: "۴ تخته",
-        time: "۱۶:۴۰ → ۱۹:۲۵",
-        ticket: 2010000
-      },
-      {
-        key: "AHVAZ_KARKHEH",
-        train: "کرخه پارس لاریم",
-        stars: "۴ ستاره",
-        berth: "۴ تخته",
-        time: "۱۳:۲۰ → ۱۵:۲۵",
-        ticket: 2230000
-      }
+      { key: "AHVAZ_MAHTAB", train: "مهتاب سیر", stars: "۳ ستاره", berth: "۶ تخته", ticket: 1940000, time: "۱۳:۲۰ تا ۱۵:۲۵" },
+      { key: "AHVAZ_OMID", train: "امید رجا", stars: "۴ ستاره", berth: "۴ تخته", ticket: 2010000, time: "۱۶:۴۰ تا ۱۹:۲۵" },
+      { key: "AHVAZ_KARKHEH", train: "کرخه پارس لاریم", stars: "۴ ستاره", berth: "۴ تخته", ticket: 2230000, time: "۱۳:۲۰ تا ۱۵:۲۵" }
     ];
   }
 
   if (r === "SHIRAZ") {
     return [
-      {
-        key: "SHIRAZ_SARIR",
-        train: "سریر رجا",
-        stars: "۴ ستاره",
-        berth: "۴ تخته",
-        time: "۱۵:۳۰ → ۱۵:۴۵",
-        ticket: 2010000
-      },
-      {
-        key: "SHIRAZ_AHOO",
-        train: "آهو رجا",
-        stars: "۴ ستاره",
-        berth: "۴ تخته",
-        time: "۱۵:۳۰ → ۱۵:۴۵",
-        ticket: 2990000
-      }
+      { key: "SHIRAZ_SARIR", train: "سریر رجا", stars: "۴ ستاره", berth: "۴ تخته", ticket: 2010000, time: "۱۵:۳۰ تا ۱۵:۴۵" },
+      { key: "SHIRAZ_AHOO", train: "آهو رجا", stars: "۴ ستاره", berth: "۴ تخته", ticket: 2990000, time: "۱۵:۳۰ تا ۱۵:۴۵" }
     ];
   }
 
@@ -3792,9 +3756,7 @@ async function handleCallback(
       data.split(":")[1];
 
     const trains =
-      getRailTrains(
-        route
-      );
+      getRailTrains(route);
 
     const rows =
       trains.map(t => [
@@ -3888,7 +3850,10 @@ async function handleCallback(
       "RAIL_BERTH",
       {
         ...d,
-        trainKey
+        trainKey,
+        trainPrice: train.ticket,
+        trainName: train.train,
+        trainBerth: train.berth
       }
     );
 
@@ -3974,10 +3939,11 @@ async function handleCallback(
     }
 
     const train =
-      getRailTrains(
-        d.route ||
-          "AHVAZ"
-      )
+      PRICING
+        .getTrainsForRoute(
+          d.route ||
+            "AHVAZ"
+        )
         .find(
           x =>
             x.key ===

@@ -1466,6 +1466,19 @@ async function submitRequest(chatId) {
   }
 
   /*
+   * محاسبه تور اتوبوسی
+   */
+  if (d.tourType === "BUS") {
+    buttons.push([
+      {
+        text: "🚌 محاسبه این درخواست اتوبوسی",
+        callback_data:
+          `CALC_BUS_REQUEST:${code}`
+      }
+    ]);
+  }
+
+  /*
    * محاسبه فقط هتل
    */
   if (d.tourType === "HOTEL") {
@@ -2367,174 +2380,93 @@ async function manualText(
     s.state === "MAN_ADULTS" &&
     d.requestCode
   ) {
-    await saveSession(
-      chatId,
-      "MAN_AIR_TICKET_ADULT",
-      d
-    );
-
+    await saveSession(chatId, "MAN_AIR_TICKET_ADULT_OUT", d);
     await sendMessage(
       chatId,
-      `✈️ محاسبه تور هوایی\n\n🆔 درخواست: ${d.requestCode}\n👨 بزرگسال: ${d.adults} نفر\n👶 کودک: ${d.children} نفر\n🌙 تعداد شب: ${d.nights}\n\n✈️ هزینه پرواز رفت‌وبرگشت هر بزرگسال را وارد کنید:`
+      `✈️ محاسبه تور هوایی\n\n🆔 درخواست: ${d.requestCode}\n👨 بزرگسال: ${d.adults} نفر\n👶 کودک: ${d.children} نفر\n🌙 تعداد شب: ${d.nights}\n\n✈️ مبلغ بلیت رفت هر بزرگسال را وارد کنید:`
     );
-
     return true;
   }
 
-  if (
-    d.type === "AIR" &&
-    s.state === "MAN_AIR_TICKET_ADULT"
-  ) {
+  if (d.type === "AIR" && s.state === "MAN_AIR_TICKET_ADULT_OUT") {
     if (v <= 0) {
-      await sendMessage(
-        chatId,
-        "❌ مبلغ پرواز بزرگسال صحیح نیست."
-      );
+      await sendMessage(chatId, "❌ مبلغ بلیت رفت بزرگسال صحیح نیست.");
       return true;
     }
-
-    await saveSession(
-      chatId,
-      "MAN_AIR_TICKET_CHILD",
-      {
-        ...d,
-        ticketAdult: v
-      }
-    );
-
-    await sendMessage(
-      chatId,
-      "👶 هزینه پرواز رفت‌وبرگشت هر کودک را وارد کنید:"
-    );
-
+    await saveSession(chatId, "MAN_AIR_TICKET_ADULT_BACK", {...d, ticketAdultOutbound: v});
+    await sendMessage(chatId, "✈️ مبلغ بلیت برگشت هر بزرگسال را وارد کنید:");
     return true;
   }
 
-  if (
-    d.type === "AIR" &&
-    s.state === "MAN_AIR_TICKET_CHILD"
-  ) {
+  if (d.type === "AIR" && s.state === "MAN_AIR_TICKET_ADULT_BACK") {
+    if (v <= 0) {
+      await sendMessage(chatId, "❌ مبلغ بلیت برگشت بزرگسال صحیح نیست.");
+      return true;
+    }
+    const next = {...d, ticketAdultReturn: v};
+    if (Number(d.children || 0) > 0) {
+      await saveSession(chatId, "MAN_AIR_TICKET_CHILD_OUT", next);
+      await sendMessage(chatId, "👶 مبلغ بلیت رفت هر کودک ۳ تا ۵ سال را وارد کنید:");
+    } else {
+      await saveSession(chatId, "MAN_AIR_PAYMENT", {...next, ticketChildOutbound: 0, ticketChildReturn: 0});
+      await sendMessage(chatId, "🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:\n\n👶 کودک ۳ تا ۵ سال به‌صورت خودکار نیم‌بهای بزرگسال محاسبه می‌شود.");
+    }
+    return true;
+  }
+
+  if (d.type === "AIR" && s.state === "MAN_AIR_TICKET_CHILD_OUT") {
     if (v < 0) {
-      await sendMessage(
-        chatId,
-        "❌ مبلغ پرواز کودک صحیح نیست."
-      );
+      await sendMessage(chatId, "❌ مبلغ بلیت رفت کودک صحیح نیست.");
       return true;
     }
-
-    await saveSession(
-      chatId,
-      "MAN_AIR_PAYMENT",
-      {
-        ...d,
-        ticketChild: v
-      }
-    );
-
-    await sendMessage(
-      chatId,
-      "🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:"
-    );
-
+    await saveSession(chatId, "MAN_AIR_TICKET_CHILD_BACK", {...d, ticketChildOutbound: v});
+    await sendMessage(chatId, "👶 مبلغ بلیت برگشت هر کودک ۳ تا ۵ سال را وارد کنید:");
     return true;
   }
 
-  if (
-    d.type === "AIR" &&
-    s.state === "MAN_AIR_PAYMENT"
-  ) {
-    if (v <= 0) {
-      await sendMessage(
-        chatId,
-        "❌ قیمت هتل صحیح نیست."
-      );
+  if (d.type === "AIR" && s.state === "MAN_AIR_TICKET_CHILD_BACK") {
+    if (v < 0) {
+      await sendMessage(chatId, "❌ مبلغ بلیت برگشت کودک صحیح نیست.");
       return true;
     }
+    await saveSession(chatId, "MAN_AIR_PAYMENT", {...d, ticketChildReturn: v});
+    await sendMessage(chatId, "🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:\n\n👶 کودک ۳ تا ۵ سال به‌صورت خودکار نیم‌بهای بزرگسال محاسبه می‌شود.");
+    return true;
+  }
 
-    const nextData = {
-      ...d,
-      hotelAdult: v
-    };
+  if (d.type === "AIR" && s.state === "MAN_AIR_PAYMENT") {
+    if (v <= 0) {
+      await sendMessage(chatId, "❌ قیمت هتل صحیح نیست.");
+      return true;
+    }
+    const nextData = {...d, hotelAdult: v};
 
-    /* اگر محاسبه مربوط به درخواست مشتری است،
-       نوع پرداخت قبلاً توسط مشتری انتخاب شده است. */
     if (d.requestCode) {
       if (d.paymentType === "loan") {
-        await saveSession(
-          chatId,
-          "MAN_AIR_LOAN_PROFIT",
-          nextData
-        );
-
-        await sendMessage(
-          chatId,
-          "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
-        );
+        await saveSession(chatId, "MAN_AIR_LOAN_PROFIT", nextData);
+        await sendMessage(chatId, "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:");
       } else {
-        await finishAirCalc(
-          chatId,
-          nextData,
-          "cash",
-          3500000
-        );
+        await finishAirCalc(chatId, nextData, "cash", 3500000);
       }
     } else {
-      await saveSession(
-        chatId,
-        "MAN_AIR_PAYMENT_SELECT",
-        nextData
-      );
-
-      await sendMessage(
-        chatId,
-        "💳 نوع پرداخت را انتخاب کنید:",
-        {
-          inline_keyboard: [
-            [
-              {
-                text: "💵 نقدی",
-                callback_data: "AIR_PAYMENT_CASH"
-              }
-            ],
-            [
-              {
-                text: "💎 طرح الماس",
-                callback_data: "AIR_PAYMENT_LOAN"
-              }
-            ],
-            [
-              {
-                text: "🔙 خروج",
-                callback_data: "ADMIN_CALC_EXIT"
-              }
-            ]
-          ]
-        }
-      );
+      await saveSession(chatId, "MAN_AIR_PAYMENT_SELECT", nextData);
+      await sendMessage(chatId, "💳 نوع پرداخت را انتخاب کنید:", {
+        inline_keyboard: [
+          [{text: "💵 نقدی", callback_data: "AIR_PAYMENT_CASH"}],
+          [{text: "💎 طرح الماس", callback_data: "AIR_PAYMENT_LOAN"}],
+          [{text: "🔙 خروج", callback_data: "ADMIN_CALC_EXIT"}]
+        ]
+      });
     }
-
     return true;
   }
 
-  if (
-    d.type === "AIR" &&
-    s.state === "MAN_AIR_LOAN_PROFIT"
-  ) {
+  if (d.type === "AIR" && s.state === "MAN_AIR_LOAN_PROFIT") {
     if (v < 5000000 || v > 6000000) {
-      await sendMessage(
-        chatId,
-        "❌ سود طرح الماس باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد."
-      );
+      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد.");
       return true;
     }
-
-    await finishAirCalc(
-      chatId,
-      d,
-      "loan",
-      v
-    );
-
+    await finishAirCalc(chatId, d, "loan", v);
     return true;
   }
 
@@ -2608,11 +2540,16 @@ async function manualText(
       return true;
     }
 
+    const nextState =
+      d.type === "AIR"
+        ? "MAN_AIR_TICKET_ADULT_OUT"
+        : d.type === "BUS"
+          ? "MAN_BUS_HOTEL"
+          : "MAN_TICKET";
+
     await saveSession(
       chatId,
-      d.type === "AIR"
-        ? "MAN_AIR_TICKET_ADULT"
-        : "MAN_TICKET",
+      nextState,
       {
         ...d,
         nights: v
@@ -2622,10 +2559,148 @@ async function manualText(
     await sendMessage(
       chatId,
       d.type === "AIR"
-        ? "✈️ هزینه پرواز رفت‌وبرگشت هر بزرگسال را وارد کنید:"
-        : "🎫 هزینه بلیت/سفر هر بزرگسال را وارد کنید:"
+        ? "✈️ مبلغ بلیت رفت هر بزرگسال را وارد کنید:"
+        : d.type === "BUS"
+          ? "🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:"
+          : "🎫 هزینه بلیت/سفر هر بزرگسال را وارد کنید:"
     );
 
+    return true;
+  }
+
+  /* محاسبه اتوبوسی: هتل */
+  if (d.type === "BUS" && s.state === "MAN_BUS_HOTEL") {
+    if (v <= 0) {
+      await sendMessage(chatId, "❌ قیمت هتل صحیح نیست.");
+      return true;
+    }
+
+    const nextData = {
+      ...d,
+      hotelAdult: v,
+      ticketAdult: 4000000,
+      childPercent: 100,
+      childHotelPercent: 50
+    };
+
+    // اگر درخواست از طرف مشتری ثبت شده باشد، نوع پرداخت از خود درخواست می‌آید.
+    if (d.requestCode) {
+      if (d.paymentType === "loan") {
+        await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", nextData);
+        await sendMessage(
+          chatId,
+          "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
+        );
+      } else {
+        await saveSession(chatId, "MAN_BUS_PROFIT", nextData);
+        await sendMessage(
+          chatId,
+          "💵 سود هر نفر برای محاسبه نقدی را وارد کنید:"
+        );
+      }
+    } else {
+      await saveSession(chatId, "MAN_BUS_PAYMENT_SELECT", nextData);
+      await sendMessage(chatId, "💳 نوع پرداخت را انتخاب کنید:", {
+        inline_keyboard: [
+          [{text: "💵 نقدی", callback_data: "BUS_PAYMENT_CASH"}],
+          [{text: "💎 طرح الماس", callback_data: "BUS_PAYMENT_LOAN"}],
+          [{text: "🔙 خروج", callback_data: "ADMIN_CALC_EXIT"}]
+        ]
+      });
+    }
+    return true;
+  }
+
+  /* محاسبه اتوبوسی: سود نقدی */
+  if (d.type === "BUS" && s.state === "MAN_BUS_PROFIT") {
+    if (v < 0) {
+      await sendMessage(chatId, "❌ سود صحیح نیست.");
+      return true;
+    }
+
+    const r = PRICING.calculateManualTour({
+      ...d,
+      ticketAdult: 4000000,
+      childPercent: 100,
+      childHotelPercent: 50,
+      manualProfit: v,
+      paymentType: "cash"
+    });
+
+    if (d.requestCode) {
+      await pool.query(
+        `UPDATE requests
+         SET payload = payload || $2::jsonb,
+             updated_at = NOW()
+         WHERE request_code=$1`,
+        [
+          d.requestCode,
+          JSON.stringify({
+            calculation: r,
+            totalCost: Number(r.finalPrice ?? r.finalCost ?? r.totalCost ?? 0),
+            calculatedAt: new Date().toISOString()
+          })
+        ]
+      );
+    }
+
+    await saveSession(chatId, "ADMIN_CALC", {
+      ...d,
+      calculation: r
+    });
+
+    await sendMessage(
+      chatId,
+      "🚌 نتیجه محاسبه تور اتوبوسی\n💵 نوع پرداخت: نقدی\n\n" + PRICING.formatManualCalculation(r),
+      managerCalcMenu(true, d.requestCode || "")
+    );
+    return true;
+  }
+
+  /* محاسبه اتوبوسی: سود طرح الماس */
+  if (d.type === "BUS" && s.state === "MAN_BUS_LOAN_PROFIT") {
+    if (v < 5000000 || v > 6000000) {
+      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد.");
+      return true;
+    }
+
+    const r = PRICING.calculateManualTour({
+      ...d,
+      ticketAdult: 4000000,
+      childPercent: 100,
+      childHotelPercent: 50,
+      manualProfit: v,
+      paymentType: "loan"
+    });
+
+    if (d.requestCode) {
+      await pool.query(
+        `UPDATE requests
+         SET payload = payload || $2::jsonb,
+             updated_at = NOW()
+         WHERE request_code=$1`,
+        [
+          d.requestCode,
+          JSON.stringify({
+            calculation: r,
+            totalCost: Number(r.finalPrice ?? r.finalCost ?? r.totalCost ?? 0),
+            calculatedAt: new Date().toISOString()
+          })
+        ]
+      );
+    }
+
+    await saveSession(chatId, "ADMIN_CALC", {
+      ...d,
+      paymentType: "loan",
+      calculation: r
+    });
+
+    await sendMessage(
+      chatId,
+      "🚌 نتیجه محاسبه تور اتوبوسی\n💎 نوع پرداخت: طرح الماس\n\n" + PRICING.formatManualCalculation(r),
+      managerCalcMenu(true, d.requestCode || "")
+    );
     return true;
   }
 
@@ -3796,7 +3871,7 @@ async function handleCallback(
     );
 
     const berth =
-      train.berth || `${train.capacity || 0} تخته`;
+      train.berth || "";
 
     await sendMessage(
       chatId,
@@ -3901,7 +3976,7 @@ async function handleCallback(
       "RAIL_BERTH_RENT"
         ? (
             train.berth ||
-            `${train.capacity || 0} تخته`
+            "6 تخته"
           )
         : "بدون اجاره";
 
@@ -4109,6 +4184,39 @@ ${e.message}`
 
   /*
    * =======================================================
+   * پرداخت محاسبه دستی تور اتوبوسی
+   * =======================================================
+   */
+
+  if (
+    (data === "BUS_PAYMENT_CASH" ||
+      data === "BUS_PAYMENT_LOAN") &&
+    isAdmin(chatId)
+  ) {
+    const s = await getSession(chatId);
+
+    if (!s || s.state !== "MAN_BUS_PAYMENT_SELECT") {
+      return;
+    }
+
+    const d = s.data || {};
+
+    if (data === "BUS_PAYMENT_CASH") {
+      await saveSession(chatId, "MAN_BUS_PROFIT", d);
+      await sendMessage(chatId, "💵 سود هر نفر برای محاسبه نقدی را وارد کنید:");
+    } else {
+      await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", d);
+      await sendMessage(
+        chatId,
+        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
+      );
+    }
+
+    return;
+  }
+
+  /*
+   * =======================================================
    * پرداخت محاسبه تور هوایی
    * =======================================================
    */
@@ -4176,7 +4284,7 @@ ${e.message}`
 
     await saveSession(
       chatId,
-      "MAN_AIR_TICKET_ADULT",
+      "MAN_AIR_TICKET_ADULT_OUT",
       {
         type: "AIR",
         requestCode: code,
@@ -4192,7 +4300,7 @@ ${e.message}`
 
     await sendMessage(
       chatId,
-      `✈️ محاسبه تور هوایی\n\n🆔 درخواست: ${code}\n👤 متقاضی: ${rq.applicant_name || ""}\n👨 بزرگسال: ${Number(p.adults || 0)} نفر\n👶 کودک: ${Number(p.children || 0)} نفر\n🌙 تعداد شب: ${Number(p.nights || 0)}\n\n✈️ هزینه پرواز رفت‌وبرگشت هر بزرگسال را وارد کنید:`
+      `✈️ محاسبه تور هوایی\n\n🆔 درخواست: ${code}\n👤 متقاضی: ${rq.applicant_name || ""}\n👨 بزرگسال: ${Number(p.adults || 0)} نفر\n👶 کودک: ${Number(p.children || 0)} نفر\n🌙 تعداد شب: ${Number(p.nights || 0)}\n\n✈️ مبلغ بلیت رفت هر بزرگسال را وارد کنید:`
     );
 
     return;
@@ -4200,7 +4308,80 @@ ${e.message}`
 
   /*
    * =======================================================
-   * محاسبات دستی
+   * اتصال درخواست اتوبوسی به محاسبه
+   * =======================================================
+   */
+
+  if (
+    data.startsWith("CALC_BUS_REQUEST:") &&
+    isAdmin(chatId)
+  ) {
+    const code = data.substring("CALC_BUS_REQUEST:".length);
+
+    const rr = await pool.query(
+      "SELECT * FROM requests WHERE request_code=$1",
+      [code]
+    );
+
+    if (!rr.rows.length) {
+      await sendMessage(chatId, "❌ درخواست پیدا نشد.");
+      return;
+    }
+
+    const rq = rr.rows[0];
+    const p = rq.payload || {};
+
+    await saveSession(chatId, "MAN_BUS_HOTEL", {
+      type: "BUS",
+      requestCode: code,
+      applicantName: rq.applicant_name || "",
+      phone: rq.phone || "",
+      nationalCode: p.nationalCode || p.national_code || rq.national_code || "",
+      adults: Number(p.adults || 0),
+      children: Number(p.children || 0),
+      nights: Number(p.nights || 0),
+      paymentType: p.paymentType || rq.payment_type || "cash",
+      busTicketRoundTrip: 4000000,
+      ticketAdult: 4000000,
+      childPercent: 100,
+      childHotelPercent: 50
+    });
+
+    await sendMessage(
+      chatId,
+      `🚌 محاسبه درخواست تور اتوبوسی\n\n🆔 درخواست: ${code}\n👤 متقاضی: ${rq.applicant_name || ""}\n👨 بزرگسال: ${Number(p.adults || 0)} نفر\n👶 کودک: ${Number(p.children || 0)} نفر\n🌙 تعداد شب: ${Number(p.nights || 0)}\n🎫 بلیت رفت و برگشت هر صندلی: ۴٬۰۰۰٬۰۰۰ تومان\n👶 کودک ۳ تا ۵ سال: بلیت کامل\n\n🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:`
+    );
+
+    return;
+  }
+
+  /*
+   * =======================================================
+   * محاسبه اختصاصی تور اتوبوسی
+   * بلیت رفت و برگشت هر صندلی = ۴٬۰۰۰٬۰۰۰ تومان
+   * کودک ۳ تا ۵ سال نیز صندلی کامل دارد.
+   * =======================================================
+   */
+
+  if (
+    data === "ADMIN_MANUAL_BUS" &&
+    isAdmin(chatId)
+  ) {
+    await saveSession(chatId, "MAN_ADULTS", {
+      type: "BUS",
+      busTicketRoundTrip: 4000000
+    });
+
+    await sendMessage(
+      chatId,
+      "🚌 محاسبه تور اتوبوسی\n\n🎫 بلیت رفت و برگشت هر صندلی: ۴٬۰۰۰٬۰۰۰ تومان\n👶 کودک ۳ تا ۵ سال: بلیت کامل\n\n👨 تعداد بزرگسال را وارد کنید:"
+    );
+    return;
+  }
+
+  /*
+   * =======================================================
+   * سایر محاسبات دستی
    * =======================================================
    */
 

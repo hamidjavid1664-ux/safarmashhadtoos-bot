@@ -31,7 +31,6 @@ const TOUR_NAMES = {
 const NEED_PASSENGER_LIST = [
   "AIR",
   "RAIL",
-  "BUS",
   "CARAVAN_BUS",
   "CARAVAN_RAIL"
 ];
@@ -1546,63 +1545,22 @@ async function approveRequest(
     `✅ درخواست ${code} تأیید شد.`
   );
 
-  const passengerData = {
-    requestCode: code,
-    tourType: payload.tourType,
-    paymentType: req.payment_type,
-    applicantName: req.applicant_name,
-    phone: req.phone
-  };
-
   /*
-   * برای تورهای هوایی، ریلی و اتوبوسی،
-   * بعد از تأیید مدیر اول لیست مسافران گرفته می‌شود.
-   * سپس وارد مرحله پرداخت می‌شویم.
+   * طرح الماس
    */
-  if (NEED_PASSENGER_LIST.includes(payload.tourType)) {
-    await saveSession(
-      req.user_id,
-      "PASSENGER_LIST",
-      passengerData
-    );
-
+  if (
+    req.payment_type === "loan"
+  ) {
     await sendMessage(
       req.user_id,
-      `✅ درخواست شما تأیید شد.
-
-🆔 شماره درخواست: ${code}
-
-📋 حالا لطفاً لیست ${payload.tourType === "BUS" ? "مسافران تور اتوبوسی" : "همراهان/مسافران"} را ارسال کنید.
-
-⭐ راحت‌ترین روش:
-1️⃣ می‌توانید یک عکس از لیست بفرستید.
-2️⃣ یا فایل Excel / PDF / Word ارسال کنید.
-3️⃣ یا اطلاعات را به صورت متن بفرستید.
-
-برای ارسال متنی، هر نفر را در یک خط بنویسید:
-نام و نام خانوادگی | کد ملی | تاریخ تولد
-
-مثال:
-علی رضایی | ۱۲۳۴۵۶۷۸۹۰ | ۱۳۶۲/۰۶/۱۷
-مریم رضایی | ۱۲۳۴۵۶۷۸۹۱ | ۱۳۶۵/۰۲/۱۰
-
-📌 فقط کافی است لیست را یکجا ارسال کنید؛ لازم نیست اطلاعات افراد را یکی‌یکی وارد کنید.`,
-      mainKeyboard()
+      diamondPaymentText(req)
     );
-
-    return;
   }
 
-  /* برای خدماتی که لیست مسافر ندارند، مستقیم وارد رسید می‌شویم. */
-  await saveSession(
-    req.user_id,
-    "PAYMENT_RECEIPT",
-    passengerData
-  );
-
-  if (req.payment_type === "loan") {
-    await sendMessage(req.user_id, diamondPaymentText(req));
-  } else {
+  /*
+   * نقدی
+   */
+  else {
     await sendMessage(
       req.user_id,
       `✅ درخواست شما تأیید شد.
@@ -1611,9 +1569,34 @@ async function approveRequest(
 
 💵 نوع پرداخت: نقدی
 
-پس از انجام پرداخت، تصویر رسید واریزی را ارسال کنید.`
+در صورت انجام پرداخت، تصویر رسید واریزی را ارسال کنید.`
     );
   }
+
+  /*
+   * هتل هم مانند سایر خدمات بعد از تأیید
+   * امکان دریافت رسید دارد.
+   */
+  await saveSession(
+    req.user_id,
+    "PAYMENT_RECEIPT",
+    {
+      requestCode: code,
+      tourType:
+        payload.tourType,
+      paymentType:
+        req.payment_type,
+      applicantName:
+        req.applicant_name,
+      phone:
+        req.phone
+    }
+  );
+
+  await sendMessage(
+    req.user_id,
+    "🧾 در صورت انجام پرداخت، لطفاً تصویر رسید واریزی را ارسال کنید."
+  );
 }
 
 /*
@@ -1682,13 +1665,46 @@ async function afterReceipt(
     [d.requestCode]
   );
 
-  await clearSession(chatId);
+  if (
+    NEED_PASSENGER_LIST.includes(
+      d.tourType
+    )
+  ) {
+    await saveSession(
+      chatId,
+      "PASSENGER_LIST",
+      d
+    );
 
-  await sendMessage(
-    chatId,
-    "✅ رسید پرداخت دریافت شد و برای مدیر ارسال گردید.\n\n📋 اطلاعات مسافران نیز قبلاً دریافت و برای مدیر ارسال شده است.\n\nدرخواست شما برای ادامه مراحل ثبت شد.",
-    mainKeyboard()
-  );
+    await sendMessage(
+      chatId,
+      `✅ رسید پرداخت دریافت شد.
+
+📋 لطفاً لیست ${
+        d.tourType.startsWith(
+          "CARAVAN"
+        )
+          ? "مسافران"
+          : "همراهان"
+      } را ارسال کنید.
+
+مشخصات هر نفر:
+نام و نام خانوادگی | کد ملی | تاریخ تولد
+
+مثال:
+علی رضایی | ۱۲۳۴۵۶۷۸۹۰ | ۱۳۶۲/۰۶/۱۷
+
+می‌توانید متن، تصویر یا فایل ارسال کنید.`
+    );
+  } else {
+    await clearSession(chatId);
+
+    await sendMessage(
+      chatId,
+      "✅ رسید پرداخت دریافت شد و درخواست برای ادامه کار ثبت گردید.",
+      mainKeyboard()
+    );
+  }
 }
 
 /*
@@ -1728,7 +1744,7 @@ async function handlePassengerText(
   for (const line of lines) {
     const p =
       line
-        .split(/\s*[|,;\t]\s*/)
+        .split("|")
         .map(x => x.trim());
 
     if (p.length !== 3) {
@@ -1804,24 +1820,11 @@ ${line}`
     ]
   );
 
-  const nextSession = {
-    ...session.data,
-    requestCode: session.data.requestCode,
-    tourType: session.data.tourType,
-    paymentType: session.data.paymentType
-  };
-
-  await saveSession(
-    chatId,
-    "PAYMENT_RECEIPT",
-    nextSession
-  );
+  await clearSession(chatId);
 
   await sendMessage(
     chatId,
-    session.data.paymentType === "loan"
-      ? "✅ لیست مسافران دریافت و برای مدیر ارسال شد.\n\n💎 حالا طبق مبلغ اعلام‌شده سهم نقدی را پرداخت کنید و تصویر رسید را ارسال کنید."
-      : "✅ لیست مسافران دریافت و برای مدیر ارسال شد.\n\n💵 حالا پرداخت را انجام دهید و تصویر رسید واریزی را ارسال کنید.",
+    "✅ لیست با موفقیت دریافت و برای مدیر ارسال شد.",
     mainKeyboard()
   );
 
@@ -1934,17 +1937,11 @@ async function handleMedia(
       ]
     );
 
-    await saveSession(
-      chatId,
-      "PAYMENT_RECEIPT",
-      session.data
-    );
+    await clearSession(chatId);
 
     await sendMessage(
       chatId,
-      session.data.paymentType === "loan"
-        ? "✅ تصویر لیست دریافت و برای مدیر ارسال شد.\n\n💎 حالا طبق مبلغ اعلام‌شده سهم نقدی را پرداخت کنید و تصویر رسید را ارسال کنید."
-        : "✅ تصویر لیست دریافت و برای مدیر ارسال شد.\n\n💵 حالا پرداخت را انجام دهید و تصویر رسید واریزی را ارسال کنید.",
+      "✅ تصویر لیست دریافت و برای مدیر ارسال شد.",
       mainKeyboard()
     );
 
@@ -1975,17 +1972,11 @@ async function handleMedia(
       ]
     );
 
-    await saveSession(
-      chatId,
-      "PAYMENT_RECEIPT",
-      session.data
-    );
+    await clearSession(chatId);
 
     await sendMessage(
       chatId,
-      session.data.paymentType === "loan"
-        ? "✅ فایل لیست دریافت و برای مدیر ارسال شد.\n\n💎 حالا طبق مبلغ اعلام‌شده سهم نقدی را پرداخت کنید و تصویر رسید را ارسال کنید."
-        : "✅ فایل لیست دریافت و برای مدیر ارسال شد.\n\n💵 حالا پرداخت را انجام دهید و تصویر رسید واریزی را ارسال کنید.",
+      "✅ فایل لیست دریافت و برای مدیر ارسال شد.",
       mainKeyboard()
     );
 
@@ -2536,40 +2527,16 @@ async function manualText(
       return true;
     }
 
-    /*
-     * تور اتوبوسی:
-     * بلیت رفت و برگشت هر صندلی ثابتاً ۴٬۰۰۰٬۰۰۰ تومان است
-     * (۲٬۰۰۰٬۰۰۰ تومان هر مسیر). کودک ۳ تا ۵ سال نیز صندلی کامل دارد.
-     */
-    if (d.type === "BUS") {
-      await saveSession(
-        chatId,
-        "MAN_HOTEL",
-        {
-          ...d,
-          nights: v,
-          ticketAdult: 4000000,
-          childPercent: 100,
-          busRental: 0
-        }
-      );
-
-      await sendMessage(
-        chatId,
-        "🚌 تور اتوبوسی\n\n" +
-          "🎫 بلیت رفت و برگشت هر صندلی: ۴٬۰۰۰٬۰۰۰ تومان\n" +
-          "👶 کودک ۳ تا ۵ سال نیز بلیت کامل محاسبه می‌شود.\n\n" +
-          "🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:"
-      );
-
-      return true;
-    }
+    const nextState =
+      d.type === "AIR"
+        ? "MAN_AIR_TICKET_ADULT_OUT"
+        : d.type === "BUS"
+          ? "MAN_BUS_HOTEL"
+          : "MAN_TICKET";
 
     await saveSession(
       chatId,
-      d.type === "AIR"
-        ? "MAN_AIR_TICKET_ADULT_OUT"
-        : "MAN_TICKET",
+      nextState,
       {
         ...d,
         nights: v
@@ -2580,9 +2547,61 @@ async function manualText(
       chatId,
       d.type === "AIR"
         ? "✈️ مبلغ بلیت رفت هر بزرگسال را وارد کنید:"
-        : "🎫 هزینه بلیت/سفر هر بزرگسال را وارد کنید:"
+        : d.type === "BUS"
+          ? "🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:"
+          : "🎫 هزینه بلیت/سفر هر بزرگسال را وارد کنید:"
     );
 
+    return true;
+  }
+
+  /* محاسبه اتوبوسی: هتل */
+  if (d.type === "BUS" && s.state === "MAN_BUS_HOTEL") {
+    if (v <= 0) {
+      await sendMessage(chatId, "❌ قیمت هتل صحیح نیست.");
+      return true;
+    }
+
+    await saveSession(chatId, "MAN_BUS_PROFIT", {
+      ...d,
+      hotelAdult: v,
+      ticketAdult: 4000000,
+      childPercent: 100,
+      childHotelPercent: 50
+    });
+
+    await sendMessage(
+      chatId,
+      "📈 سود هر نفر را وارد کنید:\n\n💵 مبلغ سود نقدی یا سود طرح الماس را وارد کنید."
+    );
+    return true;
+  }
+
+  /* محاسبه اتوبوسی: سود */
+  if (d.type === "BUS" && s.state === "MAN_BUS_PROFIT") {
+    if (v < 0) {
+      await sendMessage(chatId, "❌ سود صحیح نیست.");
+      return true;
+    }
+
+    const r = PRICING.calculateManualTour({
+      ...d,
+      ticketAdult: 4000000,
+      childPercent: 100,
+      childHotelPercent: 50,
+      manualProfit: v,
+      paymentType: "cash"
+    });
+
+    await saveSession(chatId, "ADMIN_CALC", {
+      calculation: r
+    });
+
+    await sendMessage(
+      chatId,
+      "🚌 نتیجه محاسبه تور اتوبوسی\n\n" + PRICING.formatManualCalculation(r),
+      managerCalcMenu()
+    );
     return true;
   }
 
@@ -4157,7 +4176,31 @@ ${e.message}`
 
   /*
    * =======================================================
-   * محاسبات دستی
+   * محاسبه اختصاصی تور اتوبوسی
+   * بلیت رفت و برگشت هر صندلی = ۴٬۰۰۰٬۰۰۰ تومان
+   * کودک ۳ تا ۵ سال نیز صندلی کامل دارد.
+   * =======================================================
+   */
+
+  if (
+    data === "ADMIN_MANUAL_BUS" &&
+    isAdmin(chatId)
+  ) {
+    await saveSession(chatId, "MAN_ADULTS", {
+      type: "BUS",
+      busTicketRoundTrip: 4000000
+    });
+
+    await sendMessage(
+      chatId,
+      "🚌 محاسبه تور اتوبوسی\n\n🎫 بلیت رفت و برگشت هر صندلی: ۴٬۰۰۰٬۰۰۰ تومان\n👶 کودک ۳ تا ۵ سال: بلیت کامل\n\n👨 تعداد بزرگسال را وارد کنید:"
+    );
+    return;
+  }
+
+  /*
+   * =======================================================
+   * سایر محاسبات دستی
    * =======================================================
    */
 

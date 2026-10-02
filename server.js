@@ -48,44 +48,58 @@ function isAdmin(chatId) {
 function getRailTrains(route) {
   const r = String(route || "").toUpperCase();
 
-  // اول از تابع pricing استفاده می‌کنیم؛ اگر نسخه pricing قدیمی بود،
-  // مستقیماً از CONFIG مسیرها را می‌سازیم تا انتخاب مسیر متوقف نشود.
-  if (typeof PRICING.getTrainsForRoute === "function") {
-    const trains = PRICING.getTrainsForRoute(r);
-    if (Array.isArray(trains) && trains.length) return trains;
+  // قطارهای واقعی ثبت‌شده برای محاسبه تور ریلی
+  if (r === "AHVAZ") {
+    return [
+      {
+        key: "AHVAZ_MAHTAB",
+        train: "مهتاب سیر",
+        stars: "۳ ستاره",
+        berth: "۶ تخته",
+        time: "۱۳:۲۰ → ۱۵:۲۵",
+        ticket: 1940000
+      },
+      {
+        key: "AHVAZ_OMID",
+        train: "امید رجا",
+        stars: "۴ ستاره",
+        berth: "۴ تخته",
+        time: "۱۶:۴۰ → ۱۹:۲۵",
+        ticket: 2010000
+      },
+      {
+        key: "AHVAZ_KARKHEH",
+        train: "کرخه پارس لاریم",
+        stars: "۴ ستاره",
+        berth: "۴ تخته",
+        time: "۱۳:۲۰ → ۱۵:۲۵",
+        ticket: 2230000
+      }
+    ];
   }
 
-  const cfg = CONFIG.RAIL?.TICKET_PRICES?.[r];
-
-  // اگر تنظیمات قیمت قطار در نسخه فعلی config وجود نداشت،
-  // مسیر همچنان باید بتواند قطارهای پیش‌فرض را نمایش دهد.
-  const fallbackPrice = 2990000;
-  const source = cfg || {
-    name: r === "SHIRAZ" ? "شیراز ↔ مشهد" : "اهواز ↔ مشهد",
-    FOUR_BERTH: { price: fallbackPrice },
-    SIX_BERTH: { price: fallbackPrice }
-  };
-
-  const trains = [];
-  if (source.SIX_BERTH?.price) {
-    trains.push({
-      key: `${r}_6`,
-      train: "قطار ۶ تخته",
-      stars: "۳ ستاره",
-      berth: "۶ تخته",
-      ticket: Number(source.SIX_BERTH.price)
-    });
+  if (r === "SHIRAZ") {
+    return [
+      {
+        key: "SHIRAZ_SARIR",
+        train: "سریر رجا",
+        stars: "۴ ستاره",
+        berth: "۴ تخته",
+        time: "۱۵:۳۰ → ۱۵:۴۵",
+        ticket: 2010000
+      },
+      {
+        key: "SHIRAZ_AHOO",
+        train: "آهو رجا",
+        stars: "۴ ستاره",
+        berth: "۴ تخته",
+        time: "۱۵:۳۰ → ۱۵:۴۵",
+        ticket: 2990000
+      }
+    ];
   }
-  if (source.FOUR_BERTH?.price) {
-    trains.push({
-      key: `${r}_4`,
-      train: "قطار ۴ تخته",
-      stars: "۳ ستاره",
-      berth: "۴ تخته",
-      ticket: Number(source.FOUR_BERTH.price)
-    });
-  }
-  return trains;
+
+  return [];
 }
 
 function en(v) {
@@ -3786,7 +3800,7 @@ async function handleCallback(
       trains.map(t => [
         {
           text:
-            `🚆 ${t.train} | ${t.stars} | ${t.berth || ""} | ${money(t.ticket)} تومان`,
+            `🚆 ${t.train} | ${t.stars} | ${t.berth || ""} | ${t.time || ""} | ${money(t.ticket)} تومان`,
           callback_data:
             `RAIL_TRAIN:${t.key}`
         }

@@ -56,25 +56,33 @@ function getRailTrains(route) {
   }
 
   const cfg = CONFIG.RAIL?.TICKET_PRICES?.[r];
-  if (!cfg) return [];
+
+  // اگر تنظیمات قیمت قطار در نسخه فعلی config وجود نداشت،
+  // مسیر همچنان باید بتواند قطارهای پیش‌فرض را نمایش دهد.
+  const fallbackPrice = 2990000;
+  const source = cfg || {
+    name: r === "SHIRAZ" ? "شیراز ↔ مشهد" : "اهواز ↔ مشهد",
+    FOUR_BERTH: { price: fallbackPrice },
+    SIX_BERTH: { price: fallbackPrice }
+  };
 
   const trains = [];
-  if (cfg.SIX_BERTH?.price) {
+  if (source.SIX_BERTH?.price) {
     trains.push({
       key: `${r}_6`,
       train: "قطار ۶ تخته",
       stars: "۳ ستاره",
       berth: "۶ تخته",
-      ticket: Number(cfg.SIX_BERTH.price)
+      ticket: Number(source.SIX_BERTH.price)
     });
   }
-  if (cfg.FOUR_BERTH?.price) {
+  if (source.FOUR_BERTH?.price) {
     trains.push({
       key: `${r}_4`,
       train: "قطار ۴ تخته",
       stars: "۳ ستاره",
       berth: "۴ تخته",
-      ticket: Number(cfg.FOUR_BERTH.price)
+      ticket: Number(source.FOUR_BERTH.price)
     });
   }
   return trains;

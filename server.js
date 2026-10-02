@@ -31,6 +31,7 @@ const TOUR_NAMES = {
 const NEED_PASSENGER_LIST = [
   "AIR",
   "RAIL",
+  "BUS",
   "CARAVAN_BUS",
   "CARAVAN_RAIL"
 ];
@@ -1587,28 +1588,27 @@ async function approveRequest(
   }
 
   /*
-   * هتل هم مانند سایر خدمات بعد از تأیید
-   * امکان دریافت رسید دارد.
+   * فقط یک‌بار منتظر رسید می‌مانیم.
+   * قبلاً این بخش جداگانه دوباره اجرا می‌شد و پیام رسید
+   * برای مشتری دو بار ارسال می‌شد.
    */
   await saveSession(
     req.user_id,
     "PAYMENT_RECEIPT",
     {
       requestCode: code,
-      tourType:
-        payload.tourType,
-      paymentType:
-        req.payment_type,
-      applicantName:
-        req.applicant_name,
-      phone:
-        req.phone
+      tourType: payload.tourType || req.tour_type || "",
+      paymentType: req.payment_type,
+      applicantName: req.applicant_name,
+      phone: req.phone
     }
   );
 
   await sendMessage(
     req.user_id,
-    "🧾 در صورت انجام پرداخت، لطفاً تصویر رسید واریزی را ارسال کنید."
+    `🧾 پس از انجام پرداخت، لطفاً تصویر یا فایل رسید واریزی را ارسال کنید.
+
+بعد از تأیید دریافت رسید، برای تورهای ریلی/هوایی/اتوبوسی از شما لیست مسافران یا همراهان دریافت می‌شود.`
   );
 }
 
@@ -1694,11 +1694,9 @@ async function afterReceipt(
       `✅ رسید پرداخت دریافت شد.
 
 📋 لطفاً لیست ${
-        d.tourType.startsWith(
-          "CARAVAN"
-        )
+        String(d.tourType || "").startsWith("CARAVAN")
           ? "مسافران"
-          : "همراهان"
+          : "مسافران / همراهان"
       } را ارسال کنید.
 
 مشخصات هر نفر:
@@ -4103,6 +4101,7 @@ async function handleCallback(
 
               totalCost:
                 Number(
+                  result.finalPrice ??
                   result.finalCost ??
                   result.totalCost ??
                   0

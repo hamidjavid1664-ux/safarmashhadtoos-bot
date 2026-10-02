@@ -1,4 +1,3 @@
-
 require("dotenv").config();
 const express = require("express");
 const { Pool } = require("pg");
@@ -1517,24 +1516,18 @@ async function approveRequest(
 ) {
   if (!isAdmin(adminId)) return;
 
-  const r =
-    await pool.query(
-      "SELECT * FROM requests WHERE request_code=$1",
-      [code]
-    );
+  const r = await pool.query(
+    "SELECT * FROM requests WHERE request_code=$1",
+    [code]
+  );
 
   if (!r.rows.length) {
-    await sendMessage(
-      adminId,
-      "❌ درخواست پیدا نشد."
-    );
+    await sendMessage(adminId, "❌ درخواست پیدا نشد.");
     return;
   }
 
   const req = r.rows[0];
-
-  const payload =
-    req.payload || {};
+  const payload = req.payload || {};
 
   await pool.query(
     "UPDATE requests SET status='approved',updated_at=NOW() WHERE request_code=$1",
@@ -1547,58 +1540,75 @@ async function approveRequest(
   );
 
   /*
-   * طرح الماس
+   * بعد از تأیید، برای تورهای هوایی و ریلی و کاروان‌ها
+   * ابتدا لیست مسافران/همراهان دریافت می‌شود.
+   * پیام رسید در این مرحله ارسال نمی‌شود تا دو پیام تکراری نشود.
    */
-  if (
-    req.payment_type === "loan"
-  ) {
+  if (NEED_PASSENGER_LIST.includes(payload.tourType)) {
+    await saveSession(
+      req.user_id,
+      "PASSENGER_LIST",
+      {
+        requestCode: code,
+        tourType: payload.tourType,
+        paymentType: req.payment_type,
+        applicantName: req.applicant_name,
+        phone: req.phone
+      }
+    );
+
+    const listTitle =
+      payload.tourType === "CARAVAN_BUS" ||
+      payload.tourType === "CARAVAN_RAIL"
+        ? "مسافران"
+        : "همراهان";
+
+    await sendMessage(
+      req.user_id,
+      `✅ درخواست شما تأیید شد.\n\n` +
+      `🆔 شماره درخواست: ${code}\n` +
+      `💳 نوع پرداخت: ${req.payment_type === "loan" ? "💎 طرح الماس" : "💵 نقدی"}\n\n` +
+      `📋 لطفاً لیست ${listTitle} را ارسال کنید.\n\n` +
+      `مشخصات هر نفر:\n` +
+      `نام و نام خانوادگی | کد ملی | تاریخ تولد\n\n` +
+      `مثال:\n` +
+      `علی رضایی | ۱۲۳۴۵۶۷۸۹۰ | ۱۳۶۲/۰۶/۱۷\n\n` +
+      `می‌توانید متن، تصویر یا فایل ارسال کنید.`
+    );
+
+    return;
+  }
+
+  /* فقط هتل و تورهایی که لیست مسافر ندارند */
+  if (req.payment_type === "loan") {
     await sendMessage(
       req.user_id,
       diamondPaymentText(req)
     );
-  }
-
-  /*
-   * نقدی
-   */
-  else {
+  } else {
     await sendMessage(
       req.user_id,
-      `✅ درخواست شما تأیید شد.
-
-🆔 شماره درخواست: ${code}
-
-💵 نوع پرداخت: نقدی
-
-در صورت انجام پرداخت، تصویر رسید واریزی را ارسال کنید.`
+      `✅ درخواست شما تأیید شد.\n\n` +
+      `🆔 شماره درخواست: ${code}\n` +
+      `💵 نوع پرداخت: نقدی\n\n` +
+      `در صورت انجام پرداخت، تصویر رسید واریزی را ارسال کنید.`
     );
   }
 
-  /*
-   * هتل هم مانند سایر خدمات بعد از تأیید
-   * امکان دریافت رسید دارد.
-   */
   await saveSession(
     req.user_id,
     "PAYMENT_RECEIPT",
     {
       requestCode: code,
-      tourType:
-        payload.tourType,
-      paymentType:
-        req.payment_type,
-      applicantName:
-        req.applicant_name,
-      phone:
-        req.phone
+      tourType: payload.tourType,
+      paymentType: req.payment_type,
+      applicantName: req.applicant_name,
+      phone: req.phone
     }
   );
 
-  await sendMessage(
-    req.user_id,
-    "🧾 در صورت انجام پرداخت، لطفاً تصویر رسید واریزی را ارسال کنید."
-  );
 }
+
 
 /*
  * =========================================================
@@ -1658,54 +1668,20 @@ async function afterReceipt(
   chatId,
   session
 ) {
-  const d =
-    session.data || {};
+  const d = session.data || {};
 
   await pool.query(
     "UPDATE requests SET status='receipt_received',updated_at=NOW() WHERE request_code=$1",
     [d.requestCode]
   );
 
-  if (
-    NEED_PASSENGER_LIST.includes(
-      d.tourType
-    )
-  ) {
-    await saveSession(
-      chatId,
-      "PASSENGER_LIST",
-      d
-    );
+  await clearSession(chatId);
 
-    await sendMessage(
-      chatId,
-      `✅ رسید پرداخت دریافت شد.
-
-📋 لطفاً لیست ${
-        d.tourType.startsWith(
-          "CARAVAN"
-        )
-          ? "مسافران"
-          : "همراهان"
-      } را ارسال کنید.
-
-مشخصات هر نفر:
-نام و نام خانوادگی | کد ملی | تاریخ تولد
-
-مثال:
-علی رضایی | ۱۲۳۴۵۶۷۸۹۰ | ۱۳۶۲/۰۶/۱۷
-
-می‌توانید متن، تصویر یا فایل ارسال کنید.`
-    );
-  } else {
-    await clearSession(chatId);
-
-    await sendMessage(
-      chatId,
-      "✅ رسید پرداخت دریافت شد و درخواست برای ادامه کار ثبت گردید.",
-      mainKeyboard()
-    );
-  }
+  await sendMessage(
+    chatId,
+    "✅ رسید پرداخت دریافت شد و برای مدیر ارسال گردید.\n\nدرخواست شما برای ادامه مراحل ثبت شد.",
+    mainKeyboard()
+  );
 }
 
 /*
@@ -1821,12 +1797,24 @@ ${line}`
     ]
   );
 
-  await clearSession(chatId);
+  await saveSession(
+    chatId,
+    "PAYMENT_RECEIPT",
+    {
+      requestCode: session.data.requestCode,
+      tourType: session.data.tourType,
+      paymentType: session.data.paymentType,
+      applicantName: session.data.applicantName,
+      phone: session.data.phone
+    }
+  );
 
   await sendMessage(
     chatId,
-    "✅ لیست با موفقیت دریافت و برای مدیر ارسال شد.",
-    mainKeyboard()
+    "✅ لیست با موفقیت دریافت و برای مدیر ارسال شد.\n\n" +
+    (session.data.paymentType === "loan"
+      ? "💎 اکنون سهم نقدی ۴۰٪ طرح الماس را پرداخت کنید و تصویر رسید را ارسال نمایید."
+      : "💵 اکنون پرداخت را انجام دهید و تصویر رسید واریزی را ارسال نمایید.")
   );
 
   return true;
@@ -1938,12 +1926,24 @@ async function handleMedia(
       ]
     );
 
-    await clearSession(chatId);
+    await saveSession(
+      chatId,
+      "PAYMENT_RECEIPT",
+      {
+        requestCode: session.data.requestCode,
+        tourType: session.data.tourType,
+        paymentType: session.data.paymentType,
+        applicantName: session.data.applicantName,
+        phone: session.data.phone
+      }
+    );
 
     await sendMessage(
       chatId,
-      "✅ تصویر لیست دریافت و برای مدیر ارسال شد.",
-      mainKeyboard()
+      "✅ تصویر لیست دریافت و برای مدیر ارسال شد.\n\n" +
+      (session.data.paymentType === "loan"
+        ? "💎 اکنون سهم نقدی ۴۰٪ طرح الماس را پرداخت کنید و تصویر رسید را ارسال نمایید."
+        : "💵 اکنون پرداخت را انجام دهید و تصویر رسید واریزی را ارسال نمایید.")
     );
 
     return true;
@@ -1973,12 +1973,24 @@ async function handleMedia(
       ]
     );
 
-    await clearSession(chatId);
+    await saveSession(
+      chatId,
+      "PAYMENT_RECEIPT",
+      {
+        requestCode: session.data.requestCode,
+        tourType: session.data.tourType,
+        paymentType: session.data.paymentType,
+        applicantName: session.data.applicantName,
+        phone: session.data.phone
+      }
+    );
 
     await sendMessage(
       chatId,
-      "✅ فایل لیست دریافت و برای مدیر ارسال شد.",
-      mainKeyboard()
+      "✅ فایل لیست دریافت و برای مدیر ارسال شد.\n\n" +
+      (session.data.paymentType === "loan"
+        ? "💎 اکنون سهم نقدی ۴۰٪ طرح الماس را پرداخت کنید و تصویر رسید را ارسال نمایید."
+        : "💵 اکنون پرداخت را انجام دهید و تصویر رسید واریزی را ارسال نمایید.")
     );
 
     return true;

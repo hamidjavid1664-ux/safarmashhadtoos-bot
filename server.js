@@ -45,6 +45,41 @@ function isAdmin(chatId) {
   return String(chatId) === String(CONFIG.ADMIN_CHAT_ID);
 }
 
+function getRailTrains(route) {
+  const r = String(route || "").toUpperCase();
+
+  // اول از تابع pricing استفاده می‌کنیم؛ اگر نسخه pricing قدیمی بود،
+  // مستقیماً از CONFIG مسیرها را می‌سازیم تا انتخاب مسیر متوقف نشود.
+  if (typeof PRICING.getTrainsForRoute === "function") {
+    const trains = PRICING.getTrainsForRoute(r);
+    if (Array.isArray(trains) && trains.length) return trains;
+  }
+
+  const cfg = CONFIG.RAIL?.TICKET_PRICES?.[r];
+  if (!cfg) return [];
+
+  const trains = [];
+  if (cfg.SIX_BERTH?.price) {
+    trains.push({
+      key: `${r}_6`,
+      train: "قطار ۶ تخته",
+      stars: "۳ ستاره",
+      berth: "۶ تخته",
+      ticket: Number(cfg.SIX_BERTH.price)
+    });
+  }
+  if (cfg.FOUR_BERTH?.price) {
+    trains.push({
+      key: `${r}_4`,
+      train: "قطار ۴ تخته",
+      stars: "۳ ستاره",
+      berth: "۴ تخته",
+      ticket: Number(cfg.FOUR_BERTH.price)
+    });
+  }
+  return trains;
+}
+
 function en(v) {
   return String(v ?? "")
     .replace(/[۰-۹]/g, d =>
@@ -2635,7 +2670,7 @@ async function manualText(
     await sendMessage(
       chatId,
       "🚌 نتیجه محاسبه تور اتوبوسی\n💵 نوع پرداخت: نقدی\n\n" + PRICING.formatManualCalculation(r),
-      managerCalcMenu()
+      managerCalcMenu(true, d.requestCode || "")
     );
     return true;
   }
@@ -2665,7 +2700,7 @@ async function manualText(
     await sendMessage(
       chatId,
       "🚌 نتیجه محاسبه تور اتوبوسی\n💎 نوع پرداخت: طرح الماس\n\n" + PRICING.formatManualCalculation(r),
-      managerCalcMenu()
+      managerCalcMenu(true, d.requestCode || "")
     );
     return true;
   }
@@ -3735,7 +3770,7 @@ async function handleCallback(
       data.split(":")[1];
 
     const trains =
-      PRICING.getTrainsForRoute(
+      getRailTrains(
         route
       );
 
@@ -3807,11 +3842,10 @@ async function handleCallback(
       ss?.data || {};
 
     const train =
-      PRICING
-        .getTrainsForRoute(
-          d.route ||
-            "AHVAZ"
-        )
+      getRailTrains(
+        d.route ||
+          "AHVAZ"
+      )
         .find(
           x =>
             x.key ===
@@ -3918,11 +3952,10 @@ async function handleCallback(
     }
 
     const train =
-      PRICING
-        .getTrainsForRoute(
-          d.route ||
-            "AHVAZ"
-        )
+      getRailTrains(
+        d.route ||
+          "AHVAZ"
+      )
         .find(
           x =>
             x.key ===

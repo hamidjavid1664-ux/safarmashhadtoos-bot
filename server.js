@@ -417,6 +417,11 @@ function mainKeyboard() {
         {
           text: "📢 کانال"
         }
+      ],
+      [
+        {
+          text: "📋 پیگیری درخواست"
+        }
       ]
     ],
     resize_keyboard: true
@@ -3132,6 +3137,27 @@ async function handleMessage(
   }
 
   /*
+   * پیگیری درخواست مشتری
+   */
+  if (text === "📋 پیگیری درخواست") {
+    await saveSession(chatId, "TRACK_REQUEST_CODE", {});
+    await sendMessage(
+      chatId,
+      `📋 پیگیری درخواست
+
+لطفاً کد درخواست خود را وارد کنید.
+
+مثال: SMT-123456
+
+🔒 فقط وضعیت درخواست‌های ثبت‌شده با حساب خودتان نمایش داده می‌شود.
+
+برای لغو، /start را بفرستید.`,
+      mainKeyboard()
+    );
+    return;
+  }
+
+  /*
    * طرح الماس
    */
   if (
@@ -3247,6 +3273,78 @@ ${CONFIG.CHANNEL_URL}`,
 
   session =
     await getSession(chatId);
+
+  /*
+   * دریافت کد و نمایش وضعیت درخواست خود مشتری
+   */
+  if (session?.state === "TRACK_REQUEST_CODE" && text) {
+    const code = text.trim().toUpperCase().replace(/\s+/g, "");
+    if (code === "/START") {
+      await clearSession(chatId);
+      await sendMessage(chatId, "🏠 صفحه اصلی", mainKeyboard());
+      return;
+    }
+
+    const tracked = await pool.query(
+      `SELECT request_code, applicant_name, request_type, payment_type, status, payload, created_at, updated_at
+       FROM requests
+       WHERE request_code=$1 AND user_id=$2
+       LIMIT 1`,
+      [code, String(chatId)]
+    );
+
+    if (!tracked.rows.length) {
+      await sendMessage(
+        chatId,
+        `❌ درخواستی با این کد برای حساب شما پیدا نشد.
+
+کد را بررسی کنید و دوباره بفرستید، یا برای راهنمایی با مدیر تماس بگیرید.
+📞 ۰۹۱۷۷۷۰۰۹۶۱
+
+برای بازگشت به منوی اصلی /start را بفرستید.`
+      );
+      return;
+    }
+
+    const req = tracked.rows[0];
+    const payload = req.payload || {};
+    const statusLabels = {
+      pending: "⏳ در انتظار بررسی و محاسبه مدیر",
+      approved: "✅ درخواست تأیید شده؛ مراحل پرداخت را طبق پیام مدیر انجام دهید",
+      receipt_received: "🧾 رسید پرداخت دریافت شده؛ در انتظار بررسی/ادامه مراحل",
+      passenger_received: "👥 اطلاعات مسافران دریافت شده",
+      rejected: "❌ درخواست رد شده؛ برای توضیحات با مدیر تماس بگیرید"
+    };
+    const statusText = statusLabels[req.status] || "🔄 در حال پیگیری توسط مجموعه";
+    const type = payload.tourType || payload.type || req.request_type || "ثبت درخواست سفر";
+    const payment = req.payment_type === "LOAN" || req.payment_type === "loan"
+      ? "طرح الماس / اعتباری"
+      : req.payment_type === "CASH" || req.payment_type === "cash"
+      ? "نقدی"
+      : "طبق توافق با مدیر";
+    const dateText = req.created_at
+      ? new Date(req.created_at).toLocaleDateString("fa-IR", { timeZone: "Asia/Tehran" })
+      : "ثبت شده";
+
+    await clearSession(chatId);
+    await sendMessage(
+      chatId,
+      `📋 وضعیت درخواست شما
+
+🆔 کد درخواست: ${req.request_code}
+👤 نام متقاضی: ${req.applicant_name || "ثبت‌شده در فرم"}
+🧳 نوع درخواست: ${type}
+💳 روش پرداخت: ${payment}
+📅 تاریخ ثبت: ${dateText}
+
+📌 وضعیت فعلی:
+${statusText}
+
+☎️ برای راهنمایی بیشتر: ۰۹۱۷۷۷۰۰۹۶۱`,
+      mainKeyboard()
+    );
+    return;
+  }
 
   /*
    * لیست مسافران

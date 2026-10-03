@@ -1696,7 +1696,7 @@ async function afterReceipt(
   ) {
     await saveSession(
       chatId,
-      "PASSENGER_LIST",
+      "PASSENGER_METHOD",
       d
     );
 
@@ -1704,19 +1704,23 @@ async function afterReceipt(
       chatId,
       `✅ رسید پرداخت دریافت شد.
 
-📋 لطفاً لیست ${
+👥 حالا لطفاً روش ارسال اطلاعات ${
         String(d.tourType || "").startsWith("CARAVAN")
           ? "مسافران"
           : "مسافران / همراهان"
-      } را ارسال کنید.
+      } را انتخاب کنید.
 
-مشخصات هر نفر:
-نام و نام خانوادگی | کد ملی | تاریخ تولد
-
-مثال:
-علی رضایی | ۱۲۳۴۵۶۷۸۹۰ | ۱۳۶۲/۰۶/۱۷
-
-می‌توانید متن، تصویر یا فایل ارسال کنید.`
+📱 برای استفاده با موبایل، هر کدام از روش‌های زیر را که برایتان راحت‌تر است انتخاب کنید.`,
+      {
+        keyboard: [
+          [{ text: "✍️ ثبت مرحله‌ای مسافران" }],
+          [{ text: "📋 ارسال متن چندنفره" }],
+          [{ text: "📷 ارسال عکس لیست" }],
+          [{ text: "📎 ارسال فایل لیست" }],
+          [{ text: "🔙 بازگشت به منوی اصلی" }]
+        ],
+        resize_keyboard: true
+      }
     );
   } else {
     await clearSession(chatId);
@@ -1727,6 +1731,149 @@ async function afterReceipt(
       mainKeyboard()
     );
   }
+}
+
+/*
+ * =========================================================
+ * روش‌های ارسال لیست مسافران
+ * =========================================================
+ */
+
+function passengerMethodKeyboard() {
+  return {
+    keyboard: [
+      [{ text: "✍️ ثبت مرحله‌ای مسافران" }],
+      [{ text: "📋 ارسال متن چندنفره" }],
+      [{ text: "📷 ارسال عکس لیست" }],
+      [{ text: "📎 ارسال فایل لیست" }],
+      [{ text: "🔙 بازگشت به منوی اصلی" }]
+    ],
+    resize_keyboard: true
+  };
+}
+
+function passengerInputKeyboard() {
+  return {
+    keyboard: [
+      [{ text: "➕ افزودن مسافر" }, { text: "✅ تکمیل لیست" }],
+      [{ text: "🔙 بازگشت به انتخاب روش" }]
+    ],
+    resize_keyboard: true
+  };
+}
+
+async function startPassengerStep(chatId, session) {
+  const d = session.data || {};
+  await saveSession(chatId, "PASSENGER_STEP", {
+    ...d,
+    passengers: [],
+    passengerDraft: {},
+    passengerStep: "name"
+  });
+
+  await sendMessage(
+    chatId,
+    `👤 مسافر اول
+
+① نام و نام خانوادگی را وارد کنید.
+
+مثال: علی رضایی`,
+    passengerInputKeyboard()
+  );
+}
+
+async function finishPassengerList(chatId, data) {
+  const good = Array.isArray(data.passengers) ? data.passengers : [];
+
+  if (!good.length) {
+    await sendMessage(chatId, "❌ هنوز هیچ مسافری ثبت نشده است.");
+    return false;
+  }
+
+  await sendMessage(
+    CONFIG.ADMIN_CHAT_ID,
+    `📋 لیست همراهان/مسافران\n🆔 درخواست: ${data.requestCode}\n👤 کاربر: ${data.applicantName || ""}\n📱 ${data.phone || ""}\n\n` +
+      good.map((x, i) => `${i + 1}. ${x.name} | ${x.nationalCode} | ${x.birthDate}`).join("\n")
+  );
+
+  await pool.query(
+    "UPDATE requests SET status='passenger_received',payload=payload || $2::jsonb,updated_at=NOW() WHERE request_code=$1",
+    [data.requestCode, JSON.stringify({ passengers: good })]
+  );
+
+  await clearSession(chatId);
+  await sendMessage(
+    chatId,
+    "✅ لیست با موفقیت دریافت و برای مدیر ارسال شد.",
+    mainKeyboard()
+  );
+  return true;
+}
+
+async function handlePassengerStepText(chatId, text, session) {
+  const d = session.data || {};
+  const step = d.passengerStep || "name";
+  const draft = { ...(d.passengerDraft || {}) };
+  const passengers = Array.isArray(d.passengers) ? [...d.passengers] : [];
+
+  if (text === "🔙 بازگشت به انتخاب روش") {
+    await saveSession(chatId, "PASSENGER_METHOD", { ...d });
+    await sendMessage(chatId, "👥 روش ارسال اطلاعات را انتخاب کنید.", passengerMethodKeyboard());
+    return true;
+  }
+
+  if (text === "➕ افزودن مسافر") {
+    if (step !== "name" || Object.keys(draft).length) {
+      await sendMessage(chatId, "ℹ️ ابتدا اطلاعات مسافر فعلی را کامل کنید.");
+      return true;
+    }
+    await sendMessage(chatId, `👤 مسافر ${passengers.length + 1}\n\nنام و نام خانوادگی را وارد کنید.`);
+    return true;
+  }
+
+  if (text === "✅ تکمیل لیست") {
+    if (step !== "name" || Object.keys(draft).length) {
+      await sendMessage(chatId, "❌ اطلاعات مسافر فعلی کامل نشده است.");
+      return true;
+    }
+    return finishPassengerList(chatId, d);
+  }
+
+  if (step === "name") {
+    if (!text.trim()) {
+      await sendMessage(chatId, "❌ نام و نام خانوادگی را وارد کنید.");
+      return true;
+    }
+    await saveSession(chatId, "PASSENGER_STEP", { ...d, passengerDraft: { name: text.trim() }, passengerStep: "national" });
+    await sendMessage(chatId, "🪪 کد ملی را وارد کنید.");
+    return true;
+  }
+
+  if (step === "national") {
+    const nc = en(text).replace(/\D/g, "");
+    if (!validNational(nc)) {
+      await sendMessage(chatId, "❌ کد ملی صحیح نیست. لطفاً کد ملی ۱۰ رقمی را وارد کنید.");
+      return true;
+    }
+    await saveSession(chatId, "PASSENGER_STEP", { ...d, passengerDraft: { ...draft, nationalCode: nc }, passengerStep: "birth" });
+    await sendMessage(chatId, "🎂 تاریخ تولد را به شکل ۱۳۶۲/۰۶/۱۷ وارد کنید.");
+    return true;
+  }
+
+  if (step === "birth") {
+    const bd = normalizeDate(text);
+    if (!bd) {
+      await sendMessage(chatId, "❌ تاریخ تولد صحیح نیست. نمونه صحیح: ۱۳۶۲/۰۶/۱۷");
+      return true;
+    }
+    passengers.push({ name: draft.name, nationalCode: draft.nationalCode, birthDate: bd });
+    const next = { ...d, passengers, passengerDraft: {}, passengerStep: "name" };
+    await saveSession(chatId, "PASSENGER_STEP", next);
+    await sendMessage(chatId, `✅ مسافر ${passengers.length} ثبت شد.\n\nبرای ادامه، «➕ افزودن مسافر» را بزنید یا اگر تمام شد «✅ تکمیل لیست» را انتخاب کنید.`, passengerInputKeyboard());
+    return true;
+  }
+
+  return true;
 }
 
 /*
@@ -3344,6 +3491,56 @@ ${statusText}
       mainKeyboard()
     );
     return;
+  }
+
+  /*
+   * انتخاب روش ارسال لیست مسافران
+   */
+  if (session?.state === "PASSENGER_METHOD" && text) {
+    if (text === "🔙 بازگشت به منوی اصلی") {
+      await clearSession(chatId);
+      await sendMessage(chatId, "🏠 صفحه اصلی", mainKeyboard());
+      return;
+    }
+
+    if (text === "✍️ ثبت مرحله‌ای مسافران") {
+      await startPassengerStep(chatId, session);
+      return;
+    }
+
+    if (text === "📋 ارسال متن چندنفره") {
+      await saveSession(chatId, "PASSENGER_LIST", session.data || {});
+      await sendMessage(
+        chatId,
+        `📋 لطفاً اطلاعات همه مسافران را در چند خط ارسال کنید.\n\nفرمت هر خط:
+نام و نام خانوادگی | کد ملی | تاریخ تولد\n\nمثال:
+علی رضایی | ۱۲۳۴۵۶۷۸۹۰ | ۱۳۶۲/۰۶/۱۷\nمحمد احمدی | ۰۹۸۷۶۵۴۳۲۱ | ۱۳۷۰/۰۲/۱۰`,
+        passengerMethodKeyboard()
+      );
+      return;
+    }
+
+    if (text === "📷 ارسال عکس لیست") {
+      await saveSession(chatId, "PASSENGER_LIST", session.data || {});
+      await sendMessage(chatId, "📷 لطفاً عکس واضح لیست مسافران را همین‌جا ارسال کنید.", passengerMethodKeyboard());
+      return;
+    }
+
+    if (text === "📎 ارسال فایل لیست") {
+      await saveSession(chatId, "PASSENGER_LIST", session.data || {});
+      await sendMessage(chatId, "📎 لطفاً فایل Excel یا PDF لیست مسافران را همین‌جا ارسال کنید.", passengerMethodKeyboard());
+      return;
+    }
+
+    await sendMessage(chatId, "لطفاً یکی از روش‌های ارسال لیست را انتخاب کنید.", passengerMethodKeyboard());
+    return;
+  }
+
+  /*
+   * ثبت مرحله‌ای مسافران
+   */
+  if (session?.state === "PASSENGER_STEP" && text) {
+    if (await handlePassengerStepText(chatId, text, session)) return;
   }
 
   /*

@@ -14,7 +14,9 @@ const SETTINGS = {
   RAIL_LOAN_PROFIT: 5000000,
   AIR_CASH_PROFIT: 3500000,
   AIR_LOAN_PROFIT: 6000000,
-  LOAN_ROUND_STEP: 5000000
+  LOAN_ROUND_STEP: 5000000,
+  CASH_ROUND_STEP: 100000,
+  DIAMOND_TOTAL_ROUND_STEP: 500000
 };
 
 const RAIL_TRAINS = {
@@ -80,7 +82,43 @@ function formatNumber(value) {
 
 function roundLoanAmount(amount) {
   const step = SETTINGS.LOAN_ROUND_STEP;
-  return Math.round(toNumber(amount) / step) * step;
+  return Math.ceil(toNumber(amount) / step) * step;
+}
+
+function roundUpAmount(amount, step) {
+  const n = toNumber(amount);
+  const s = Math.max(1, toNumber(step));
+  return Math.ceil(n / s) * s;
+}
+
+function roundCashAmount(amount) {
+  return roundUpAmount(amount, SETTINGS.CASH_ROUND_STEP);
+}
+
+function roundDiamondTotal(amount) {
+  return roundUpAmount(amount, SETTINGS.DIAMOND_TOTAL_ROUND_STEP);
+}
+
+function applyDiamondSplit(totalAmount, loanPercent = 60) {
+  const total = roundDiamondTotal(totalAmount);
+  const allowed = [50, 60, 70, 80];
+  const percent = allowed.includes(Number(loanPercent)) ? Number(loanPercent) : 60;
+  let loanAmount = roundLoanAmount(total * percent / 100);
+
+  if (loanAmount >= total) {
+    loanAmount = Math.max(0, Math.floor((total - 1) / SETTINGS.LOAN_ROUND_STEP) * SETTINGS.LOAN_ROUND_STEP);
+  }
+
+  const customerCash = total - loanAmount;
+  return {
+    total,
+    loanPercent: percent,
+    cashPercent: 100 - percent,
+    loanAmount,
+    customerCash,
+    cashPercentActual: total ? (customerCash / total) * 100 : 0,
+    loanPercentActual: total ? (loanAmount / total) * 100 : 0
+  };
 }
 
 function getTrainsForRoute(route) {
@@ -188,20 +226,20 @@ function calculateRailTour(data) {
       : SETTINGS.RAIL_CASH_PROFIT;
 
   const totalProfit = profitPerPerson * totalPassengers;
-  const finalPrice = netPurchaseTotal + totalProfit;
+  const rawFinalPrice = netPurchaseTotal + totalProfit;
+  const finalPrice = paymentType === "loan"
+    ? roundDiamondTotal(rawFinalPrice)
+    : roundCashAmount(rawFinalPrice);
 
   let customerCash = 0;
   let loanAmount = 0;
+  let loanPercent = null;
 
   if (paymentType === "loan") {
-    loanAmount = roundLoanAmount(finalPrice * 0.60);
-
-    // وام از قیمت کل بیشتر نشود و سهم نقدی باقی‌مانده باشد.
-    if (loanAmount >= finalPrice) {
-      loanAmount = Math.max(0, roundLoanAmount(finalPrice * 0.60) - SETTINGS.LOAN_ROUND_STEP);
-    }
-
-    customerCash = finalPrice - loanAmount;
+    const split = applyDiamondSplit(finalPrice, data.loanPercent ?? 60);
+    customerCash = split.customerCash;
+    loanAmount = split.loanAmount;
+    loanPercent = split.loanPercent;
   }
 
   return {
@@ -237,7 +275,9 @@ function calculateRailTour(data) {
     profitPerPerson,
     totalProfit,
     finalPrice,
+    rawFinalPrice,
     paymentType,
+    loanPercent,
     customerCash,
     loanAmount,
     cashPercentActual: finalPrice ? (customerCash / finalPrice) * 100 : 0,
@@ -269,13 +309,13 @@ function formatRailCalculation(result) {
 
   text += "\n━━━━━━━━━━━━━━\n🚆 بلیت رفت و برگشت\n\n";
   text += `🎫 بلیت بزرگسال + صدور: ${formatMoney(result.ticket.adultRoundTrip)}\n`;
-  text += `🎫 بلیت کودک + صدور: ${formatMoney(result.ticket.childRoundTrip)}\n`;
+  if (result.children > 0) text += `🎫 بلیت کودک + صدور: ${formatMoney(result.ticket.childRoundTrip)}\n`;
 
   text += "\n━━━━━━━━━━━━━━\n🏨 هتل\n\n";
   text += `🏨 نرخ بزرگسال هر شب: ${formatMoney(result.hotelPrice)}\n`;
   text += `👧 کودک هتل: ${formatNumber(result.childHotelPercent)}٪\n`;
   text += `🏨 هزینه هتل بزرگسالان: ${formatMoney(result.adults * result.hotel.adultHotel)}\n`;
-  text += `🏨 هزینه هتل کودکان: ${formatMoney(result.children * result.hotel.childHotel)}\n`;
+  if (result.children > 0) text += `🏨 هزینه هتل کودکان: ${formatMoney(result.children * result.hotel.childHotel)}\n`;
 
   text += "\n━━━━━━━━━━━━━━\n💰 هزینه تمام‌شده\n\n";
   text += `💰 نت خرید کل: ${formatMoney(result.netPurchaseTotal)}\n`;
@@ -339,14 +379,19 @@ function calculateManualTour(data) {
   }
 
   const totalProfit = profitPerPerson * totalPassengers;
-  const finalPrice = netPurchaseTotal + totalProfit;
+  const rawFinalPrice = netPurchaseTotal + totalProfit;
+  const finalPrice = paymentType === "loan"
+    ? roundDiamondTotal(rawFinalPrice)
+    : roundCashAmount(rawFinalPrice);
   let customerCash = 0;
   let loanAmount = 0;
+  let loanPercent = null;
 
   if (paymentType === "loan") {
-    loanAmount = roundLoanAmount(finalPrice * 0.60);
-    if (loanAmount >= finalPrice) loanAmount = Math.max(0, loanAmount - SETTINGS.LOAN_ROUND_STEP);
-    customerCash = finalPrice - loanAmount;
+    const split = applyDiamondSplit(finalPrice, data.loanPercent ?? 60);
+    customerCash = split.customerCash;
+    loanAmount = split.loanAmount;
+    loanPercent = split.loanPercent;
   }
 
   return {
@@ -373,9 +418,13 @@ function calculateManualTour(data) {
     profitPerPerson,
     totalProfit,
     finalPrice,
+    rawFinalPrice,
     paymentType,
+    loanPercent,
     loanAmount,
-    customerCash
+    customerCash,
+    cashPercentActual: finalPrice ? (customerCash / finalPrice) * 100 : 0,
+    loanPercentActual: finalPrice ? (loanAmount / finalPrice) * 100 : 0
   };
 }
 
@@ -420,7 +469,7 @@ function formatManualCalculation(result) {
 `;
   }
   text += `🏨 هتل هر بزرگسال/شب: ${formatMoney(result.hotelAdult)}\n`;
-  text += `🏨 هتل هر کودک/شب: ${formatMoney(result.childHotel)}\n`;
+  if (result.children > 0) text += `🏨 هتل هر کودک/شب: ${formatMoney(result.childHotel)}\n`;
   if (result.busRental > 0) text += `🚌 اجاره اتوبوس: ${formatMoney(result.busRental)}\n`;
   text += `\n💰 نت خرید کل: ${formatMoney(result.netPurchaseTotal)}\n`;
   text += "\n━━━━━━━━━━━━━━\n📈 سود فروش\n\n";
@@ -445,6 +494,10 @@ module.exports = {
   calculateManualTour,
   formatManualCalculation,
   roundLoanAmount,
+  roundUpAmount,
+  roundCashAmount,
+  roundDiamondTotal,
+  applyDiamondSplit,
   formatMoney,
   formatNumber
 };

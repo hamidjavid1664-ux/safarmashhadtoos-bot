@@ -207,6 +207,13 @@ function todayJalali() {
 
 async function initDB() {
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS bot_settings(
+      key TEXT PRIMARY KEY,
+      value TEXT
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions(
       user_id TEXT PRIMARY KEY,
       state TEXT,
@@ -337,6 +344,21 @@ async function bale(method, body) {
   }
 
   return j;
+}
+
+async function getChannelTarget() {
+  // اولویت: ENV، سپس config، سپس شناسه‌ای که از channel_post خود کانال ذخیره شده است
+  if (process.env.CHANNEL_ID) return String(process.env.CHANNEL_ID).trim();
+  if (CONFIG.CHANNEL_ID) return String(CONFIG.CHANNEL_ID).trim();
+  try {
+    const r = await pool.query(
+      "SELECT value FROM bot_settings WHERE key='channel_id' LIMIT 1"
+    );
+    if (r.rows[0]?.value) return String(r.rows[0].value).trim();
+  } catch (e) {
+    console.error("channel target lookup:", e.message);
+  }
+  return "@safarmashhadtoos";
 }
 
 async function sendMessage(
@@ -1567,22 +1589,9 @@ async function approveRequest(
 
   /*
    * یک پیام کامل و واحد برای پرداخت ارسال می‌شود.
-   * نوع پرداخت را از DB و payload به صورت مقاوم می‌خوانیم
-   * تا برای «فقط هتل» هم بعد از تأیید مدیر حتماً ارسال شود.
    */
-  const normalizedPaymentType = String(
-    req.payment_type || payload.paymentType || "cash"
-  ).trim().toLowerCase();
-
-  if (normalizedPaymentType === "loan" || normalizedPaymentType === "diamond") {
-    await sendMessage(req.user_id, diamondPaymentText({
-      ...req,
-      payment_type: "loan",
-      payload: {
-        ...payload,
-        paymentType: "loan"
-      }
-    }));
+  if (req.payment_type === "loan") {
+    await sendMessage(req.user_id, diamondPaymentText(req));
   } else {
     const total = Number(payload.calculation?.finalPrice ?? payload.totalCost ?? 0);
     await sendMessage(req.user_id, `✅ درخواست شما تأیید شد.\n\n🆔 شماره درخواست: ${code}\n💰 هزینه کل سفر: ${money(total)} تومان\n💵 مبلغ قابل پرداخت: ${money(total)} تومان\n\n${paymentInfoText()}\n\n⚠️ پس از پرداخت، تصویر یا فایل رسید واریزی را همین‌جا ارسال کنید.\nبعد از تأیید رسید، در صورت نیاز لیست مسافران یا همراهان از شما دریافت می‌شود.`);
@@ -2336,7 +2345,7 @@ function managerCalcMenu(
   if (requestCode) {
     rows.push([
       {
-        text: "🧪 تست بازخورد مشتری",
+        text: "💬 بازخورد مشتری",
         callback_data: `TEST_FEEDBACK:${requestCode}`
       }
     ]);
@@ -3947,12 +3956,21 @@ async function handleCallback(
     // کانال از تنظیمات پروژه خوانده می‌شود؛ در config.js مقدار CHANNEL_ID را می‌توان
     // به شناسه کانال یا @username کانال اختصاص داد. اگر CHANNEL_ID تنظیم نشده باشد،
     // از username ثابت کانال فعلی استفاده می‌کنیم.
-    const channelId = CONFIG.CHANNEL_ID || "@safarmashhadtoos";
+    const channelId = await getChannelTarget();
 
-    if (feedback.photoFileId) {
-      await sendPhoto(channelId, feedback.photoFileId, post);
-    } else {
-      await sendMessage(channelId, post);
+    try {
+      if (feedback.photoFileId) {
+        await sendPhoto(channelId, feedback.photoFileId, post);
+      } else {
+        await sendMessage(channelId, post);
+      }
+    } catch (e) {
+      console.error("❌ Channel publish error:", e.message);
+      await sendMessage(
+        CONFIG.ADMIN_CHAT_ID,
+        `❌ انتشار در کانال انجام نشد.\n\nخطای بله: ${e.message}\n\n🔧 اگر ربات ادمین کانال است، مقدار CHANNEL_ID کانال را در تنظیمات Render قرار دهید.`
+      );
+      return;
     }
 
     await pool.query(
@@ -3988,7 +4006,7 @@ async function handleCallback(
     const rr = await pool.query("SELECT * FROM requests WHERE request_code=$1", [code]);
     if (!rr.rows.length) { await sendMessage(chatId, "❌ درخواست پیدا نشد."); return; }
     await startFeedback(rr.rows[0]);
-    await sendMessage(chatId, `🧪 تست بازخورد برای درخواست ${code} شروع شد.`);
+    await sendMessage(chatId, `💬 بازخورد مشتری برای درخواست ${code} شروع شد.`);
     return;
   }
 
@@ -5223,6 +5241,17 @@ app.post(
     res.sendStatus(200);
 
     try {
+      // وقتی ربات ادمین کانال باشد، بله channel_post را برای وبهوک می‌فرستد.
+      // شناسه واقعی کانال را ذخیره می‌کنیم تا انتشار با chat_id قطعی انجام شود.
+      if (req.body?.channel_post?.chat?.id) {
+        const channelChatId = String(req.body.channel_post.chat.id);
+        await pool.query(
+          `INSERT INTO bot_settings(key, value) VALUES('channel_id', $1)
+           ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
+          [channelChatId]
+        );
+      }
+
       if (
         req.body?.message
       ) {

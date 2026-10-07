@@ -546,7 +546,9 @@ function diamondPlanText() {
 🚫 بدون مراجعه به شعبه
 📄 اصل مدارک باید بارگذاری شود.
 
-💳 پس از تأیید، مسافر باید ۴۰٪ هزینه کل سفر را پرداخت کند و رسید را ارسال نماید.
+💳 پس از تأیید، مسافر باید سهم نقدی تعیین‌شده توسط مدیر را پرداخت کند و رسید را ارسال نماید.
+
+📌 سهم نقدی می‌تواند بر اساس طرح انتخابی مدیر متفاوت باشد (۸۰٪ وام / ۲۰٪ نقد، ۷۰٪ / ۳۰٪، ۶۰٪ / ۴۰٪ یا ۵۰٪ / ۵۰٪).
 
 ☎️ پشتیبانی: ${CONFIG.CONTACT.phone}`;
 }
@@ -1565,9 +1567,22 @@ async function approveRequest(
 
   /*
    * یک پیام کامل و واحد برای پرداخت ارسال می‌شود.
+   * نوع پرداخت را از DB و payload به صورت مقاوم می‌خوانیم
+   * تا برای «فقط هتل» هم بعد از تأیید مدیر حتماً ارسال شود.
    */
-  if (req.payment_type === "loan") {
-    await sendMessage(req.user_id, diamondPaymentText(req));
+  const normalizedPaymentType = String(
+    req.payment_type || payload.paymentType || "cash"
+  ).trim().toLowerCase();
+
+  if (normalizedPaymentType === "loan" || normalizedPaymentType === "diamond") {
+    await sendMessage(req.user_id, diamondPaymentText({
+      ...req,
+      payment_type: "loan",
+      payload: {
+        ...payload,
+        paymentType: "loan"
+      }
+    }));
   } else {
     const total = Number(payload.calculation?.finalPrice ?? payload.totalCost ?? 0);
     await sendMessage(req.user_id, `✅ درخواست شما تأیید شد.\n\n🆔 شماره درخواست: ${code}\n💰 هزینه کل سفر: ${money(total)} تومان\n💵 مبلغ قابل پرداخت: ${money(total)} تومان\n\n${paymentInfoText()}\n\n⚠️ پس از پرداخت، تصویر یا فایل رسید واریزی را همین‌جا ارسال کنید.\nبعد از تأیید رسید، در صورت نیاز لیست مسافران یا همراهان از شما دریافت می‌شود.`);
@@ -3244,32 +3259,36 @@ async function hotelCalcText(
       childHotel
     );
 
-  const result = {
+  const baseResult = {
     type: "HOTEL",
-
-    hotelPricePerPersonPerNight:
-      price,
-
+    hotelPricePerPersonPerNight: price,
     adults,
-
     children,
-
+    totalPassengers: adults + children,
     nights,
-
+    hotelAdult: price,
+    childHotel: price * 0.5,
     adultHotel,
-
-    childHotel,
-
+    childHotelTotal: childHotel,
+    ticketAdult: 0,
+    childTicket: 0,
+    busRental: 0,
+    netPurchaseTotal: finalCost,
+    profitPerPerson: 0,
+    totalProfit: 0,
     finalCost,
-
-    totalCost:
-      finalCost,
-
-    customerCash:
-      Math.ceil(
-        finalCost * 0.4
-      )
+    finalPrice: finalCost,
+    totalCost: finalCost
   };
+
+  // برای هتل نیز مانند تورهای ریلی، هوایی و اتوبوسی،
+  // درصد طرح الماس توسط مدیر انتخاب می‌شود.
+  if (d.paymentType === "loan") {
+    await showDiamondRatioSelection(chatId, d, baseResult);
+    return true;
+  }
+
+  const result = baseResult;
 
   /*
    * ذخیره محاسبه داخل درخواست
@@ -3330,14 +3349,11 @@ ${money(childHotel)} تومان
 ${money(finalCost)} تومان
 `;
 
-  if (
-    d.paymentType ===
-    "loan"
-  ) {
+  if (d.paymentType === "loan") {
     out += `
 💎 طرح الماس
 
-💳 سهم نقدی ۴۰٪:
+💳 سهم نقدی طبق درصد انتخابی مدیر:
 ${money(result.customerCash)} تومان
 `;
   }

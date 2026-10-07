@@ -601,7 +601,7 @@ ${CONFIG.PAYMENT.account}
 🔗 شماره شبا:
 ${CONFIG.PAYMENT.iban}
 
-⚠️ پس از پرداخت، تصویر فیش واریزی را همین‌جا ارسال کنید.`;
+⚠️ پس از پرداخت، تصویر یا فایل رسید واریزی را همین‌جا ارسال کنید.`;
 }
 
 /*
@@ -633,8 +633,6 @@ function diamondPaymentText(req) {
 💎 مبلغ تأمین‌شده از طرح (${loanPercent}٪): ${money(loan)} تومان
 
 ${paymentInfoText()}
-
-⚠️ پس از پرداخت، تصویر یا فایل رسید واریزی را همین‌جا ارسال کنید.
 
 بعد از تأیید رسید، در صورت نیاز لیست مسافران یا همراهان از شما دریافت می‌شود.`;
   }
@@ -1649,7 +1647,11 @@ async function finishFeedback(chatId, session) {
   if (d.feedbackText) admin += `\n💬 نظر مشتری:\n${d.feedbackText}\n`;
   admin += `\n📢 اجازه انتشار با نام کوچک: ${d.consent === true ? "✅ بله" : "❌ خیر"}`;
 
-  await sendMessage(CONFIG.ADMIN_CHAT_ID, admin);
+  const adminKeyboard = d.consent === true
+    ? { inline_keyboard: [[{ text: "📢 انتشار در کانال", callback_data: `FEEDBACK_PUBLISH:${reqCode}` }]] }
+    : undefined;
+
+  await sendMessage(CONFIG.ADMIN_CHAT_ID, admin, adminKeyboard);
 
   const update = {
     feedback: {
@@ -1657,6 +1659,9 @@ async function finishFeedback(chatId, session) {
       average: avg,
       text: d.feedbackText || "",
       consent: d.consent === true,
+      photoFileId: d.photoFileId || "",
+      voiceFileId: d.voiceFileId || "",
+      channelPublished: false,
       completedAt: new Date().toISOString()
     }
   };
@@ -3878,6 +3883,76 @@ async function handleCallback(
     if (!s) return;
     const yes = data.endsWith(":YES");
     await finishFeedback(chatId, { ...s, data: { ...(s.data || {}), consent: yes } });
+    return;
+  }
+
+  if (data.startsWith("FEEDBACK_PUBLISH:")) {
+    if (!isAdmin(chatId)) return;
+
+    const code = data.substring("FEEDBACK_PUBLISH:".length).trim();
+    if (!code) return;
+
+    const rr = await pool.query(
+      "SELECT * FROM requests WHERE request_code=$1",
+      [code]
+    );
+
+    if (!rr.rows.length) {
+      await sendMessage(CONFIG.ADMIN_CHAT_ID, "❌ اطلاعات بازخورد این درخواست پیدا نشد.");
+      return;
+    }
+
+    const req = rr.rows[0];
+    const feedback = req.payload?.feedback || {};
+
+    if (feedback.consent !== true) {
+      await sendMessage(CONFIG.ADMIN_CHAT_ID, "❌ این مشتری اجازه انتشار در کانال را نداده است.");
+      return;
+    }
+
+    if (feedback.channelPublished === true) {
+      await sendMessage(CONFIG.ADMIN_CHAT_ID, "ℹ️ این بازخورد قبلاً در کانال منتشر شده است.");
+      return;
+    }
+
+    const firstName = String(req.applicant_name || "زائر عزیز").trim().split(/\s+/)[0] || "زائر عزیز";
+    const ratings = feedback.ratings || {};
+    const avg = feedback.average || "-";
+
+    let post = `🌟 تجربه زائران «سفر مشهد توس»\n━━━━━━━━━━━━━━━━━━\n👤 ${firstName}\n📊 امتیاز کلی: ${avg} از ۵\n\n`;
+    FEEDBACK_QUESTIONS.forEach((q, i) => {
+      post += `${q}: ${ratings[i] || "-"} ⭐\n`;
+    });
+    if (feedback.text) {
+      post += `\n💬 نظر زائر:\n${feedback.text}\n`;
+    }
+    post += `\n🌹 سپاس از اعتماد شما به «سفر مشهد توس»`;
+
+    // کانال از تنظیمات پروژه خوانده می‌شود؛ در config.js مقدار CHANNEL_ID را می‌توان
+    // به شناسه کانال یا @username کانال اختصاص داد. اگر CHANNEL_ID تنظیم نشده باشد،
+    // از username ثابت کانال فعلی استفاده می‌کنیم.
+    const channelId = CONFIG.CHANNEL_ID || "@safarmashhadtoos";
+
+    if (feedback.photoFileId) {
+      await sendPhoto(channelId, feedback.photoFileId, post);
+    } else {
+      await sendMessage(channelId, post);
+    }
+
+    await pool.query(
+      `UPDATE requests
+       SET payload = payload || $2::jsonb, updated_at=NOW()
+       WHERE request_code=$1`,
+      [code, JSON.stringify({
+        feedback: {
+          ...feedback,
+          channelPublished: true,
+          channelPublishedAt: new Date().toISOString()
+        }
+      })]
+    );
+
+    await sendMessage(CONFIG.ADMIN_CHAT_ID, `✅ بازخورد درخواست ${code} با نام «${firstName}» با موفقیت در کانال منتشر شد.`);
     return;
   }
 

@@ -4,6 +4,9 @@ const { Pool } = require("pg");
 const CONFIG = require("./config");
 const PRICING = require("./pricing");
 
+// شناسه مدیر را اول از Environment و سپس از config می‌خوانیم.
+const ADMIN_CHAT_ID = String(process.env.ADMIN_CHAT_ID || CONFIG.ADMIN_CHAT_ID || "").trim();
+
 const app = express();
 
 app.use(express.json({ limit: "20mb" }));
@@ -42,41 +45,11 @@ const NEED_PASSENGER_LIST = [
  * =========================================================
  */
 
-function getActorId(obj) {
-  return String(
-    obj?.from?.id ??
-    obj?.from?.user_id ??
-    obj?.sender?.id ??
-    obj?.sender?.user_id ??
-    obj?.user?.id ??
-    obj?.user?.user_id ??
-    ""
-  ).trim();
-}
-
-function isAdmin(chatId, userId = null, username = null) {
-  const adminId = String(
-    process.env.ADMIN_USER_ID ||
-    CONFIG.ADMIN_USER_ID ||
-    CONFIG.ADMIN_CHAT_ID ||
-    ""
-  ).trim();
-
+function isAdmin(chatId, userId = null) {
+  const adminId = ADMIN_CHAT_ID;
   const c = String(chatId || "").trim();
   const u = String(userId || "").trim();
-  const un = String(username || "").trim().replace(/^@/, "").toLowerCase();
-  const adminUsername = String(
-    process.env.ADMIN_USERNAME ||
-    CONFIG.ADMIN_USERNAME ||
-    ""
-  ).trim().replace(/^@/, "").toLowerCase();
-
-  if (!adminId && !adminUsername) return false;
-
-  return (
-    (adminId && (c === adminId || u === adminId)) ||
-    (adminUsername && un && un === adminUsername)
-  );
+  return Boolean(adminId) && (c === adminId || u === adminId);
 }
 
 function en(v) {
@@ -289,10 +262,6 @@ async function initDB() {
 
 let diamondEnabledCache = false;
 
-// کش کوتاه‌مدت نشست‌ها برای جلوگیری از گیر کردن فرم مشتری
-// در صورت کندی لحظه‌ای PostgreSQL، مرحله فعلی کاربر از بین نمی‌رود.
-const runtimeSessions = new Map();
-
 async function loadDiamondEnabledAtStartup() {
   try {
     const r = await withTimeout(
@@ -402,26 +371,21 @@ function diamondUnavailableKeyboard() {
   }
 }
 
+const sessionMemory = new Map();
+
 async function getSession(id) {
   const key = String(id);
-  const cached = runtimeSessions.get(key);
-  if (cached) return cached;
-
   try {
     const r = await withTimeout(
-      pool.query(
-        "SELECT * FROM sessions WHERE user_id=$1",
-        [key]
-      ),
+      pool.query("SELECT * FROM sessions WHERE user_id=$1", [key]),
       2500
     );
-
     const row = r.rows[0] || null;
-    if (row) runtimeSessions.set(key, row);
-    return row;
+    if (row) sessionMemory.set(key, row);
+    return row || sessionMemory.get(key) || null;
   } catch (e) {
-    console.error("getSession error:", e.message);
-    return null;
+    console.error("Session read fallback:", e.message);
+    return sessionMemory.get(key) || null;
   }
 }
 
@@ -431,23 +395,14 @@ async function saveSession(
   data = {}
 ) {
   const key = String(id);
-  const row = {
-    user_id: key,
-    state,
-    data
-  };
-
-  // اول حافظه را به‌روز می‌کنیم تا پیام بعدی کاربر معطل دیتابیس نشود.
-  runtimeSessions.set(key, row);
+  const row = { user_id: key, state, data, updated_at: new Date() };
+  sessionMemory.set(key, row);
 
   try {
     await withTimeout(
       pool.query(
         `INSERT INTO sessions(
-          user_id,
-          state,
-          data,
-          updated_at
+          user_id, state, data, updated_at
         )
         VALUES($1,$2,$3,NOW())
         ON CONFLICT(user_id)
@@ -455,33 +410,26 @@ async function saveSession(
           state=EXCLUDED.state,
           data=EXCLUDED.data,
           updated_at=NOW()`,
-        [
-          key,
-          state,
-          JSON.stringify(data)
-        ]
+        [key, state, JSON.stringify(data)]
       ),
       2500
     );
   } catch (e) {
-    console.error("saveSession error:", e.message);
+    console.error("Session save fallback:", e.message);
     // نشست در حافظه باقی می‌ماند تا فرم مشتری متوقف نشود.
   }
 }
 
 async function clearSession(id) {
   const key = String(id);
-  runtimeSessions.delete(key);
+  sessionMemory.delete(key);
   try {
     await withTimeout(
-      pool.query(
-        "DELETE FROM sessions WHERE user_id=$1",
-        [key]
-      ),
+      pool.query("DELETE FROM sessions WHERE user_id=$1", [key]),
       2500
     );
   } catch (e) {
-    console.error("clearSession error:", e.message);
+    console.error("Session clear fallback:", e.message);
   }
 }
 
@@ -1122,11 +1070,16 @@ async function askPayment(
   chatId,
   d
 ) {
-  // این مرحله باید حتی در صورت کندی دیتابیس هم فوراً به مشتری پاسخ بدهد.
-  await saveSession(chatId, "TOUR_PAYMENT", d);
+  // ذخیره مرحله پرداخت نباید رابط کاربر را متوقف کند.
+  // ذخیره در دیتابیس در پس‌زمینه انجام می‌شود تا بعد از تعداد کودک
+  // بلافاصله دکمه‌های نوع پرداخت برای مشتری نمایش داده شوند.
+  saveSession(chatId, "TOUR_PAYMENT", d).catch((e) =>
+    console.error("TOUR_PAYMENT session save error:", e.message)
+  );
 
+  // برای اینکه مرحله فرم مشتری به دیتابیس وابسته نباشد، وضعیت کش‌شده را می‌خوانیم.
+  // وضعیت کش در شروع ربات از دیتابیس بارگذاری می‌شود و با فعال/غیرفعال کردن مدیر فوراً تغییر می‌کند.
   const enabled = Boolean(diamondEnabledCache);
-
   const rows = [
     [
       {
@@ -1152,23 +1105,13 @@ async function askPayment(
     }
   ]);
 
-  try {
-    await sendMessage(
-      chatId,
-      enabled
-        ? "💳 نوع پرداخت را انتخاب کنید:"
-        : "💳 نوع پرداخت را انتخاب کنید:\n\n💎 در حال حاضر امکان ثبت درخواست جدید طرح الماس وجود ندارد و فقط پرداخت نقدی فعال است.",
-      { inline_keyboard: rows }
-    );
-  } catch (e) {
-    console.error("askPayment send error:", e.message);
-    // حتی اگر ارسال دکمه‌ها خطا داد، کاربر باید یک پاسخ قابل مشاهده دریافت کند.
-    await sendMessage(
-      chatId,
-      "💳 نوع پرداخت:\n\n💵 پرداخت نقدی را انتخاب کنید یا برای ادامه /start را بفرستید."
-    );
-  }
+  await sendMessage(
+    chatId,
+    "💳 نوع پرداخت را انتخاب کنید:",
+    { inline_keyboard: rows }
+  );
 }
+
 async function askName(
   chatId,
   d
@@ -1717,7 +1660,7 @@ async function submitRequest(chatId) {
   }
 
   await sendMessage(
-    CONFIG.ADMIN_CHAT_ID,
+    ADMIN_CHAT_ID,
     admin,
     {
       inline_keyboard:
@@ -1871,7 +1814,7 @@ async function finishFeedback(chatId, session) {
     ? { inline_keyboard: [[{ text: "📢 انتشار در کانال", callback_data: `FEEDBACK_PUBLISH:${reqCode}` }]] }
     : undefined;
 
-  await sendMessage(CONFIG.ADMIN_CHAT_ID, admin, adminKeyboard);
+  await sendMessage(ADMIN_CHAT_ID, admin, adminKeyboard);
 
   const update = {
     feedback: {
@@ -2087,7 +2030,7 @@ async function finishPassengerList(chatId, data) {
   }
 
   await sendMessage(
-    CONFIG.ADMIN_CHAT_ID,
+    ADMIN_CHAT_ID,
     `📋 لیست همراهان/مسافران\n🆔 درخواست: ${data.requestCode}\n👤 کاربر: ${data.applicantName || ""}\n📱 ${data.phone || ""}\n\n` +
       good.map((x, i) => `${i + 1}. ${x.name} | ${x.nationalCode} | ${x.birthDate}`).join("\n")
   );
@@ -2254,7 +2197,7 @@ ${line}`
   }
 
   await sendMessage(
-    CONFIG.ADMIN_CHAT_ID,
+    ADMIN_CHAT_ID,
     `📋 لیست همراهان/مسافران
 🆔 درخواست: ${
       session.data.requestCode
@@ -2312,14 +2255,14 @@ async function handleMedia(
   if (session?.state === "FEEDBACK_CONTENT") {
     const d = session.data || {};
     if (message.voice?.file_id) {
-      await sendVoice(CONFIG.ADMIN_CHAT_ID, message.voice.file_id, `🎤 پیام صوتی بازخورد\n🆔 درخواست: ${d.requestCode}`);
+      await sendVoice(ADMIN_CHAT_ID, message.voice.file_id, `🎤 پیام صوتی بازخورد\n🆔 درخواست: ${d.requestCode}`);
       await saveSession(chatId, "FEEDBACK_CONSENT", { ...d, voiceFileId: message.voice.file_id });
       await sendMessage(chatId, "📷 اگر عکس یادگاری دارید همین‌جا بفرستید؛ در غیر این صورت «⏭️ بدون عکس» را بزنید.", { keyboard: [[{text:"⏭️ بدون عکس"}]], resize_keyboard:true });
       return true;
     }
     if (message.photo?.length) {
       const photo = message.photo[message.photo.length - 1];
-      await sendPhoto(CONFIG.ADMIN_CHAT_ID, photo.file_id, `📷 عکس یادگاری بازخورد\n🆔 درخواست: ${d.requestCode}`);
+      await sendPhoto(ADMIN_CHAT_ID, photo.file_id, `📷 عکس یادگاری بازخورد\n🆔 درخواست: ${d.requestCode}`);
       await saveSession(chatId, "FEEDBACK_CONSENT", { ...d, photoFileId: photo.file_id });
       await sendMessage(chatId, "📢 آیا اجازه می‌دهید نظر یا عکس شما با نام کوچک در کانال «سفر مشهد توس» منتشر شود؟", { inline_keyboard: [[{text:"✅ بله، با افتخار", callback_data:"FEEDBACK_CONSENT:YES"},{text:"❌ خیر، فقط داخلی", callback_data:"FEEDBACK_CONSENT:NO"}]] });
       return true;
@@ -2329,7 +2272,7 @@ async function handleMedia(
   if (session?.state === "FEEDBACK_CONSENT" && message.photo?.length) {
     const photo = message.photo[message.photo.length - 1];
     const d = session.data || {};
-    await sendPhoto(CONFIG.ADMIN_CHAT_ID, photo.file_id, `📷 عکس یادگاری بازخورد\n🆔 درخواست: ${d.requestCode}`);
+    await sendPhoto(ADMIN_CHAT_ID, photo.file_id, `📷 عکس یادگاری بازخورد\n🆔 درخواست: ${d.requestCode}`);
     await saveSession(chatId, "FEEDBACK_CONSENT", { ...d, photoFileId: photo.file_id });
     await sendMessage(chatId, "📢 آیا اجازه می‌دهید نظر یا عکس شما با نام کوچک در کانال «سفر مشهد توس» منتشر شود؟", { inline_keyboard: [[{text:"✅ بله، با افتخار", callback_data:"FEEDBACK_CONSENT:YES"},{text:"❌ خیر، فقط داخلی", callback_data:"FEEDBACK_CONSENT:NO"}]] });
     return true;
@@ -2349,7 +2292,7 @@ async function handleMedia(
       ];
 
     await sendPhoto(
-      CONFIG.ADMIN_CHAT_ID,
+      ADMIN_CHAT_ID,
       photo.file_id,
       `🧾 رسید پرداخت
 🆔 درخواست: ${
@@ -2380,7 +2323,7 @@ async function handleMedia(
       "PAYMENT_RECEIPT"
   ) {
     await sendDocument(
-      CONFIG.ADMIN_CHAT_ID,
+      ADMIN_CHAT_ID,
       message.document.file_id,
       `🧾 رسید پرداخت
 🆔 درخواست: ${
@@ -2413,7 +2356,7 @@ async function handleMedia(
       ];
 
     await sendPhoto(
-      CONFIG.ADMIN_CHAT_ID,
+      ADMIN_CHAT_ID,
       p.file_id,
       `📋 تصویر لیست مسافران
 🆔 درخواست: ${
@@ -2448,7 +2391,7 @@ async function handleMedia(
       "PASSENGER_LIST"
   ) {
     await sendDocument(
-      CONFIG.ADMIN_CHAT_ID,
+      ADMIN_CHAT_ID,
       message.document.file_id,
       `📋 فایل لیست مسافران
 🆔 درخواست: ${
@@ -4077,10 +4020,7 @@ async function handleCallback(
 
   const chatId =
     String(
-      cb?.message?.chat?.id ||
-      cb?.chat?.id ||
-      getActorId(cb) ||
-      ""
+      cb?.message?.chat?.id || ""
     );
 
   if (!chatId) return;
@@ -4091,22 +4031,15 @@ async function handleCallback(
 
   // مدیریت وضعیت وام الماس — فقط مدیر
   if (data === "ADMIN_DIAMOND_STATUS" || data === "ADMIN_DIAMOND_ENABLE" || data === "ADMIN_DIAMOND_DISABLE") {
-    const actorId = getActorId(cb);
-    const actorUsername = getUsername(cb);
-
-    if (!isAdmin(chatId, actorId, actorUsername)) {
+    if (!isAdmin(chatId, cb?.from?.id)) {
       await sendMessage(chatId, "⛔ این بخش فقط برای مدیر قابل استفاده است.");
       return;
     }
 
-    // اگر دکمه در گروه مدیران فشرده شده باشد، پاسخ در همان گروه می‌رود.
-    // اگر در پیام خصوصی مدیر باشد، همان چت خصوصی استفاده می‌شود.
-    const adminReplyChatId = chatId || actorId;
-
     if (data === "ADMIN_DIAMOND_STATUS") {
       const enabled = Boolean(diamondEnabledCache);
       await sendMessage(
-        adminReplyChatId,
+        chatId,
         `💎 مدیریت وضعیت وام الماس\n\nوضعیت فعلی: ${enabled ? "🟢 فعال" : "🔴 غیرفعال"}\n\n🔒 این بخش فقط برای مدیر نمایش داده می‌شود.\n\nبا فعال بودن، مشتری می‌تواند درخواست جدید طرح الماس ثبت کند؛ با غیرفعال بودن، درخواست جدید وام متوقف و مشتری به سفر نقدی هدایت می‌شود.`,
         { inline_keyboard: [
           [{ text: "🟢 فعال‌سازی وام الماس", callback_data: "ADMIN_DIAMOND_ENABLE" }],
@@ -4121,7 +4054,7 @@ async function handleCallback(
     if (data === "ADMIN_DIAMOND_ENABLE") {
       const saved = await setDiamondEnabled(true);
       await sendMessage(
-        adminReplyChatId,
+        chatId,
         saved
           ? "🟢 طرح الماس با موفقیت فعال شد.\n\nاز این لحظه مشتریان می‌توانند درخواست جدید طرح الماس ثبت کنند."
           : "🟢 طرح الماس فعال شد، اما ذخیره دائمی در پایگاه‌داده انجام نشد. لطفاً وضعیت دیتابیس را بررسی کنید.",
@@ -4132,7 +4065,7 @@ async function handleCallback(
 
     const saved = await setDiamondEnabled(false);
     await sendMessage(
-      adminReplyChatId,
+      chatId,
       saved
         ? "🔴 طرح الماس موقتاً غیرفعال شد.\n\nدرخواست‌های جدید وام ثبت نمی‌شوند و مشتریان به خدمات سفر نقدی هدایت خواهند شد.\n\nدرخواست‌های قبلی و اطلاعات آن‌ها حفظ می‌شوند."
         : "🔴 طرح الماس غیرفعال شد، اما ذخیره دائمی در پایگاه‌داده انجام نشد. لطفاً وضعیت دیتابیس را بررسی کنید.",
@@ -4181,7 +4114,7 @@ async function handleCallback(
     );
 
     if (!rr.rows.length) {
-      await sendMessage(CONFIG.ADMIN_CHAT_ID, "❌ اطلاعات بازخورد این درخواست پیدا نشد.");
+      await sendMessage(ADMIN_CHAT_ID, "❌ اطلاعات بازخورد این درخواست پیدا نشد.");
       return;
     }
 
@@ -4189,12 +4122,12 @@ async function handleCallback(
     const feedback = req.payload?.feedback || {};
 
     if (feedback.consent !== true) {
-      await sendMessage(CONFIG.ADMIN_CHAT_ID, "❌ این مشتری اجازه انتشار در کانال را نداده است.");
+      await sendMessage(ADMIN_CHAT_ID, "❌ این مشتری اجازه انتشار در کانال را نداده است.");
       return;
     }
 
     if (feedback.channelPublished === true) {
-      await sendMessage(CONFIG.ADMIN_CHAT_ID, "ℹ️ این بازخورد قبلاً در کانال منتشر شده است.");
+      await sendMessage(ADMIN_CHAT_ID, "ℹ️ این بازخورد قبلاً در کانال منتشر شده است.");
       return;
     }
 
@@ -4225,7 +4158,7 @@ async function handleCallback(
     } catch (e) {
       console.error("❌ Channel publish error:", e.message);
       await sendMessage(
-        CONFIG.ADMIN_CHAT_ID,
+        ADMIN_CHAT_ID,
         `❌ انتشار در کانال انجام نشد.\n\nخطای بله: ${e.message}\n\n🔧 اگر ربات ادمین کانال است، مقدار CHANNEL_ID کانال را در تنظیمات Render قرار دهید.`
       );
       return;
@@ -4244,7 +4177,7 @@ async function handleCallback(
       })]
     );
 
-    await sendMessage(CONFIG.ADMIN_CHAT_ID, `✅ بازخورد درخواست ${code} با نام «${firstName}» با موفقیت در کانال منتشر شد.`);
+    await sendMessage(ADMIN_CHAT_ID, `✅ بازخورد درخواست ${code} با نام «${firstName}» با موفقیت در کانال منتشر شد.`);
     return;
   }
 

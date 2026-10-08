@@ -256,6 +256,20 @@ async function initDB() {
 
 let diamondEnabledCache = false;
 
+async function loadDiamondEnabledAtStartup() {
+  try {
+    const r = await withTimeout(
+      pool.query("SELECT value FROM bot_settings WHERE key='diamond_loan_enabled' LIMIT 1"),
+      2500
+    );
+    if (r.rows.length) {
+      diamondEnabledCache = String(r.rows[0].value).toLowerCase() === "true";
+    }
+  } catch (e) {
+    console.error("Diamond startup status read error:", e.message);
+  }
+}
+
 function withTimeout(promise, ms = 2500) {
   return Promise.race([
     promise,
@@ -1036,7 +1050,9 @@ async function askPayment(
     d
   );
 
-  const enabled = await getDiamondEnabled();
+  // برای اینکه مرحله فرم مشتری به دیتابیس وابسته نباشد، وضعیت کش‌شده را می‌خوانیم.
+  // وضعیت کش در شروع ربات از دیتابیس بارگذاری می‌شود و با فعال/غیرفعال کردن مدیر فوراً تغییر می‌کند.
+  const enabled = Boolean(diamondEnabledCache);
   const rows = [
     [
       {
@@ -3991,7 +4007,7 @@ async function handleCallback(
     if (!isAdmin(chatId)) return;
 
     if (data === "ADMIN_DIAMOND_STATUS") {
-      const enabled = await getDiamondEnabled();
+      const enabled = Boolean(diamondEnabledCache);
       await sendMessage(
         chatId,
         `💎 مدیریت وضعیت وام الماس\n\nوضعیت فعلی: ${enabled ? "🟢 فعال" : "🔴 غیرفعال"}\n\n🔒 این بخش فقط برای مدیر نمایش داده می‌شود.\n\nبا فعال بودن، مشتری می‌تواند درخواست جدید طرح الماس ثبت کند؛ با غیرفعال بودن، درخواست جدید وام متوقف و مشتری به سفر نقدی هدایت می‌شود.`,
@@ -4193,7 +4209,7 @@ async function handleCallback(
       data ===
         "TOUR_PAYMENT_LOAN"
     ) {
-      if (data === "TOUR_PAYMENT_LOAN" && !(await getDiamondEnabled())) {
+      if (data === "TOUR_PAYMENT_LOAN" && !diamondEnabledCache) {
         await sendMessage(chatId, diamondUnavailableText(), diamondUnavailableKeyboard());
         return;
       }
@@ -5464,6 +5480,7 @@ app.get(
 (async () => {
   try {
     await initDB();
+    await loadDiamondEnabledAtStartup();
 
     app.listen(
       CONFIG.PORT,

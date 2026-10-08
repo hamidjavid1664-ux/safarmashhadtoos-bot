@@ -327,6 +327,7 @@ function formatRailCalculation(result) {
     text += "\n━━━━━━━━━━━━━━\n💎 طرح الماس\n\n";
     text += `🔹 سهم نقدی مشتری: ${formatMoney(result.customerCash)}\n`;
     text += `🔹 مبلغ وام: ${formatMoney(result.loanAmount)}\n`;
+    text += `📌 درصد انتخاب‌شده: ${formatNumber(result.loanPercent)}٪ وام / ${formatNumber(result.cashPercent)}٪ نقد\n`;
     text += `📊 سهم واقعی نقدی پس از رُند: ${result.cashPercentActual.toFixed(1)}٪\n`;
     text += `📊 سهم واقعی وام پس از رُند: ${result.loanPercentActual.toFixed(1)}٪\n`;
   }
@@ -480,6 +481,7 @@ function formatManualCalculation(result) {
     text += "\n━━━━━━━━━━━━━━\n💎 طرح الماس\n\n";
     text += `💵 سهم نقدی مشتری: ${formatMoney(result.customerCash)}\n`;
     text += `💎 مبلغ وام رُندشده: ${formatMoney(result.loanAmount)}\n`;
+    text += `📌 درصد انتخاب‌شده: ${formatNumber(result.loanPercent)}٪ وام / ${formatNumber(result.cashPercent)}٪ نقد\n`;
   }
   return text;
 }

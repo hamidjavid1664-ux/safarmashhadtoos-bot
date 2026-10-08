@@ -241,6 +241,50 @@ async function initDB() {
     )
   `);
 
+
+async function getDiamondEnabled() {
+  const r = await pool.query(
+    "SELECT value FROM bot_settings WHERE key='diamond_loan_enabled' LIMIT 1"
+  );
+  if (!r.rows.length) return false;
+  return String(r.rows[0].value).toLowerCase() === "true";
+}
+
+async function setDiamondEnabled(enabled) {
+  await pool.query(
+    `INSERT INTO bot_settings(key,value) VALUES('diamond_loan_enabled',$1)
+     ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
+    [enabled ? "true" : "false"]
+  );
+}
+
+function diamondUnavailableText() {
+  return `💎 اطلاعیه مهم درباره طرح الماس شهر بهشت
+
+همراه گرامی، زائر محترم امام رضا (ع) 🌷
+
+با توجه به تکمیل ظرفیت فعلی تخصیص اعتبار طرح الماس، در حال حاضر امکان اختصاص وام برای ثبت درخواست‌های جدید فراهم نیست.
+
+⏳ این محدودیت موقتی است و فعال‌شدن مجدد طرح، منوط به تأمین اعتبار توسط سرمایه‌گذار و اعلام ظرفیت جدید خواهد بود.
+
+🚌 خبر خوب اینکه همچنان می‌توانید از خدمات سفر نقدی شهر بهشت استفاده کنید!
+
+شما می‌توانید تورهای هوایی، ریلی و اتوبوسی مشهد و همچنین خدمات رزرو هتل را به‌صورت نقدی دریافت کنید.
+
+🙏 از اعتماد و همراهی شما سپاسگزاریم.
+
+💚 شهر بهشت | سفر هوشمندانه به مشهد مقدس`;
+}
+
+function diamondUnavailableKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "🚌 مشاهده تورهای نقدی", callback_data: "DIAMOND_CASH_TOURS" }],
+      [{ text: "🔙 بازگشت", callback_data: "DIAMOND_BACK" }]
+    ]
+  };
+}
+
   const cols = [
     "applicant_name",
     "phone",
@@ -575,7 +619,17 @@ function diamondPlanText() {
 ☎️ پشتیبانی: ${CONFIG.CONTACT.phone}`;
 }
 
-function sendDiamondPlan(chatId) {
+async function sendDiamondPlan(chatId) {
+  const enabled = await getDiamondEnabled();
+
+  if (!enabled) {
+    return sendMessage(
+      chatId,
+      diamondUnavailableText(),
+      diamondUnavailableKeyboard()
+    );
+  }
+
   return sendMessage(
     chatId,
     diamondPlanText(),
@@ -942,34 +996,36 @@ async function askPayment(
     d
   );
 
+  const enabled = await getDiamondEnabled();
+  const rows = [
+    [
+      {
+        text: "💵 پرداخت نقدی",
+        callback_data: "TOUR_PAYMENT_CASH"
+      }
+    ]
+  ];
+
+  if (enabled) {
+    rows.push([
+      {
+        text: "💎 طرح الماس شهر بهشت",
+        callback_data: "TOUR_PAYMENT_LOAN"
+      }
+    ]);
+  }
+
+  rows.push([
+    {
+      text: "🔙 بازگشت",
+      callback_data: "TOUR_BACK"
+    }
+  ]);
+
   await sendMessage(
     chatId,
     "💳 نوع پرداخت را انتخاب کنید:",
-    {
-      inline_keyboard: [
-        [
-          {
-            text: "💵 پرداخت نقدی",
-            callback_data:
-              "TOUR_PAYMENT_CASH"
-          }
-        ],
-        [
-          {
-            text: "💎 طرح الماس شهر بهشت",
-            callback_data:
-              "TOUR_PAYMENT_LOAN"
-          }
-        ],
-        [
-          {
-            text: "🔙 بازگشت",
-            callback_data:
-              "TOUR_BACK"
-          }
-        ]
-      ]
-    }
+    { inline_keyboard: rows }
   );
 }
 
@@ -2353,6 +2409,13 @@ function managerCalcMenu(
 
   rows.push([
     {
+      text: "💎 مدیریت وام الماس",
+      callback_data: "ADMIN_DIAMOND_STATUS"
+    }
+  ]);
+
+  rows.push([
+    {
       text: "🔙 خروج",
       callback_data:
         "ADMIN_CALC_EXIT"
@@ -2946,7 +3009,7 @@ async function manualText(
         await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", nextData);
         await sendMessage(
           chatId,
-          "💎 سود هر نفر برای طرح الماس تور اتوبوسی را وارد کنید.\n\nمبلغ باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد:"
+          "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
         );
       } else {
         await saveSession(chatId, "MAN_BUS_PROFIT", nextData);
@@ -3016,8 +3079,8 @@ async function manualText(
 
   /* محاسبه اتوبوسی: سود طرح الماس */
   if (d.type === "BUS" && s.state === "MAN_BUS_LOAN_PROFIT") {
-    if (v < 2000000 || v > 2500000) {
-      await sendMessage(chatId, "❌ سود طرح الماس برای تور اتوبوسی باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد.");
+    if (v < 5000000 || v > 6000000) {
+      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد.");
       return true;
     }
 
@@ -4010,6 +4073,11 @@ async function handleCallback(
     return;
   }
 
+  if (data === "DIAMOND_CASH_TOURS") {
+    await sendMessage(chatId, "🚌 خدمات سفر نقدی\n\nلطفاً نوع سفر موردنظر را انتخاب کنید:", tourMenu());
+    return;
+  }
+
   /*
    * =======================================================
    * تورها
@@ -4043,6 +4111,11 @@ async function handleCallback(
       data ===
         "TOUR_PAYMENT_LOAN"
     ) {
+      if (data === "TOUR_PAYMENT_LOAN" && !(await getDiamondEnabled())) {
+        await sendMessage(chatId, diamondUnavailableText(), diamondUnavailableKeyboard());
+        return;
+      }
+
       const s =
         await getSession(
           chatId
@@ -4247,6 +4320,57 @@ async function handleCallback(
       code
     );
 
+    return;
+  }
+
+  /*
+   * =======================================================
+   * مدیریت وضعیت وام الماس
+   * =======================================================
+   */
+
+  if (data === "ADMIN_DIAMOND_STATUS" && isAdmin(chatId)) {
+    const enabled = await getDiamondEnabled();
+    await sendMessage(
+      chatId,
+      `💎 مدیریت وضعیت وام الماس\n\nوضعیت فعلی: ${enabled ? "🟢 فعال" : "🔴 غیرفعال"}\n\n🔒 این بخش فقط برای مدیر نمایش داده می‌شود.\n\nوقتی وام غیرفعال باشد، مشتریان درخواست جدید وام ثبت نمی‌کنند و به خدمات سفر نقدی هدایت می‌شوند.`,
+      {
+        inline_keyboard: [
+          [
+            { text: "🟢 فعال‌سازی وام الماس", callback_data: "ADMIN_DIAMOND_ENABLE" }
+          ],
+          [
+            { text: "🔴 توقف موقت وام الماس", callback_data: "ADMIN_DIAMOND_DISABLE" }
+          ],
+          [
+            { text: "🔄 بروزرسانی وضعیت", callback_data: "ADMIN_DIAMOND_STATUS" }
+          ],
+          [
+            { text: "🔙 بازگشت به محاسبات", callback_data: "ADMIN_CALC_EXIT" }
+          ]
+        ]
+      }
+    );
+    return;
+  }
+
+  if (data === "ADMIN_DIAMOND_ENABLE" && isAdmin(chatId)) {
+    await setDiamondEnabled(true);
+    await sendMessage(
+      chatId,
+      "🟢 طرح الماس با موفقیت فعال شد.\n\nاز این لحظه مشتریان می‌توانند درخواست جدید طرح الماس ثبت کنند.",
+      { inline_keyboard: [[{ text: "💎 مدیریت وام الماس", callback_data: "ADMIN_DIAMOND_STATUS" }], [{ text: "🔙 محاسبات مدیر", callback_data: "ADMIN_CALC_EXIT" }]] }
+    );
+    return;
+  }
+
+  if (data === "ADMIN_DIAMOND_DISABLE" && isAdmin(chatId)) {
+    await setDiamondEnabled(false);
+    await sendMessage(
+      chatId,
+      "🔴 طرح الماس موقتاً غیرفعال شد.\n\nدرخواست‌های جدید وام ثبت نمی‌شوند و مشتریان به خدمات سفر نقدی هدایت خواهند شد.\n\nدرخواست‌های قبلی و اطلاعات آن‌ها حفظ می‌شوند.",
+      { inline_keyboard: [[{ text: "💎 مدیریت وام الماس", callback_data: "ADMIN_DIAMOND_STATUS" }], [{ text: "🔙 محاسبات مدیر", callback_data: "ADMIN_CALC_EXIT" }]] }
+    );
     return;
   }
 
@@ -4756,15 +4880,6 @@ async function handleCallback(
             "بدون اجاره"
         });
 
-      if (data === "RAIL_PAYMENT_LOAN") {
-        await showDiamondRatioSelection(
-          chatId,
-          { ...d, type: "RAIL" },
-          { ...result, type: "RAIL" }
-        );
-        return;
-      }
-
       /*
        * ذخیره محاسبه داخل درخواست
        */
@@ -4890,7 +5005,7 @@ ${e.message}`
       await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", d);
       await sendMessage(
         chatId,
-        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد:"
+        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
       );
     }
 

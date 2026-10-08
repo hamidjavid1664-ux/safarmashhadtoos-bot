@@ -42,8 +42,11 @@ const NEED_PASSENGER_LIST = [
  * =========================================================
  */
 
-function isAdmin(chatId) {
-  return String(chatId) === String(CONFIG.ADMIN_CHAT_ID);
+function isAdmin(chatId, userId = null) {
+  const adminId = String(process.env.ADMIN_CHAT_ID || CONFIG.ADMIN_CHAT_ID || "").trim();
+  const c = String(chatId || "").trim();
+  const u = String(userId || "").trim();
+  return Boolean(adminId) && (c === adminId || u === adminId);
 }
 
 function en(v) {
@@ -222,6 +225,18 @@ async function initDB() {
     )
   `);
 
+  await pool.query(
+    `INSERT INTO bot_settings(key,value) VALUES('diamond_loan_enabled','false')
+     ON CONFLICT(key) DO NOTHING`
+  );
+
+  try {
+    const dr = await pool.query("SELECT value FROM bot_settings WHERE key='diamond_loan_enabled' LIMIT 1");
+    if (dr.rows.length) diamondEnabledCache = String(dr.rows[0].value).toLowerCase() === "true";
+  } catch (e) {
+    console.error("Diamond cache init error:", e.message);
+  }
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS requests(
       id SERIAL PRIMARY KEY,
@@ -240,6 +255,92 @@ async function initDB() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+
+
+let diamondEnabledCache = false;
+
+async function loadDiamondEnabledAtStartup() {
+  try {
+    const r = await withTimeout(
+      pool.query("SELECT value FROM bot_settings WHERE key='diamond_loan_enabled' LIMIT 1"),
+      2500
+    );
+    if (r.rows.length) {
+      diamondEnabledCache = String(r.rows[0].value).toLowerCase() === "true";
+    }
+  } catch (e) {
+    console.error("Diamond startup status read error:", e.message);
+  }
+}
+
+function withTimeout(promise, ms = 2500) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("database timeout")), ms))
+  ]);
+}
+
+async function getDiamondEnabled() {
+  try {
+    const r = await withTimeout(
+      pool.query(
+        "SELECT value FROM bot_settings WHERE key='diamond_loan_enabled' LIMIT 1"
+      ),
+      2500
+    );
+    if (!r.rows.length) return diamondEnabledCache;
+    diamondEnabledCache = String(r.rows[0].value).toLowerCase() === "true";
+    return diamondEnabledCache;
+  } catch (e) {
+    console.error("Diamond status read error:", e.message);
+    return diamondEnabledCache;
+  }
+}
+
+async function setDiamondEnabled(enabled) {
+  diamondEnabledCache = Boolean(enabled);
+  try {
+    await withTimeout(
+      pool.query(
+        `INSERT INTO bot_settings(key,value) VALUES('diamond_loan_enabled',$1)
+         ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
+        [enabled ? "true" : "false"]
+      ),
+      2500
+    );
+    return true;
+  } catch (e) {
+    console.error("Diamond status save error:", e.message);
+    return false;
+  }
+}
+
+function diamondUnavailableText() {
+  return `💎 اطلاعیه مهم درباره طرح الماس شهر بهشت
+
+همراه گرامی، زائر محترم امام رضا (ع) 🌷
+
+با توجه به تکمیل ظرفیت فعلی تخصیص اعتبار طرح الماس، در حال حاضر امکان اختصاص وام برای ثبت درخواست‌های جدید فراهم نیست.
+
+⏳ این محدودیت موقتی است و فعال‌شدن مجدد طرح، منوط به تأمین اعتبار توسط سرمایه‌گذار و اعلام ظرفیت جدید خواهد بود.
+
+🚌 خبر خوب اینکه همچنان می‌توانید از خدمات سفر نقدی شهر بهشت استفاده کنید!
+
+شما می‌توانید تورهای هوایی، ریلی و اتوبوسی مشهد و همچنین خدمات رزرو هتل را به‌صورت نقدی دریافت کنید.
+
+🙏 از اعتماد و همراهی شما سپاسگزاریم.
+
+💚 شهر بهشت | سفر هوشمندانه به مشهد مقدس`;
+}
+
+function diamondUnavailableKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "🚌 مشاهده تورهای نقدی", callback_data: "DIAMOND_CASH_TOURS" }],
+      [{ text: "🔙 بازگشت", callback_data: "DIAMOND_BACK" }]
+    ]
+  };
+}
 
   const cols = [
     "applicant_name",
@@ -575,7 +676,17 @@ function diamondPlanText() {
 ☎️ پشتیبانی: ${CONFIG.CONTACT.phone}`;
 }
 
-function sendDiamondPlan(chatId) {
+async function sendDiamondPlan(chatId) {
+  const enabled = await getDiamondEnabled();
+
+  if (!enabled) {
+    return sendMessage(
+      chatId,
+      diamondUnavailableText(),
+      diamondUnavailableKeyboard()
+    );
+  }
+
   return sendMessage(
     chatId,
     diamondPlanText(),
@@ -936,40 +1047,45 @@ async function askPayment(
   chatId,
   d
 ) {
-  await saveSession(
-    chatId,
-    "TOUR_PAYMENT",
-    d
+  // ذخیره مرحله پرداخت نباید رابط کاربر را متوقف کند.
+  // ذخیره در دیتابیس در پس‌زمینه انجام می‌شود تا بعد از تعداد کودک
+  // بلافاصله دکمه‌های نوع پرداخت برای مشتری نمایش داده شوند.
+  saveSession(chatId, "TOUR_PAYMENT", d).catch((e) =>
+    console.error("TOUR_PAYMENT session save error:", e.message)
   );
+
+  // برای اینکه مرحله فرم مشتری به دیتابیس وابسته نباشد، وضعیت کش‌شده را می‌خوانیم.
+  // وضعیت کش در شروع ربات از دیتابیس بارگذاری می‌شود و با فعال/غیرفعال کردن مدیر فوراً تغییر می‌کند.
+  const enabled = Boolean(diamondEnabledCache);
+  const rows = [
+    [
+      {
+        text: "💵 پرداخت نقدی",
+        callback_data: "TOUR_PAYMENT_CASH"
+      }
+    ]
+  ];
+
+  if (enabled) {
+    rows.push([
+      {
+        text: "💎 طرح الماس شهر بهشت",
+        callback_data: "TOUR_PAYMENT_LOAN"
+      }
+    ]);
+  }
+
+  rows.push([
+    {
+      text: "🔙 بازگشت",
+      callback_data: "TOUR_BACK"
+    }
+  ]);
 
   await sendMessage(
     chatId,
     "💳 نوع پرداخت را انتخاب کنید:",
-    {
-      inline_keyboard: [
-        [
-          {
-            text: "💵 پرداخت نقدی",
-            callback_data:
-              "TOUR_PAYMENT_CASH"
-          }
-        ],
-        [
-          {
-            text: "💎 طرح الماس شهر بهشت",
-            callback_data:
-              "TOUR_PAYMENT_LOAN"
-          }
-        ],
-        [
-          {
-            text: "🔙 بازگشت",
-            callback_data:
-              "TOUR_BACK"
-          }
-        ]
-      ]
-    }
+    { inline_keyboard: rows }
   );
 }
 
@@ -2353,6 +2469,13 @@ function managerCalcMenu(
 
   rows.push([
     {
+      text: "💎 مدیریت وام الماس",
+      callback_data: "ADMIN_DIAMOND_STATUS"
+    }
+  ]);
+
+  rows.push([
+    {
       text: "🔙 خروج",
       callback_data:
         "ADMIN_CALC_EXIT"
@@ -2801,7 +2924,7 @@ async function manualText(
     if (d.requestCode) {
       if (d.paymentType === "loan") {
         await saveSession(chatId, "MAN_AIR_LOAN_PROFIT", nextData);
-        await sendMessage(chatId, "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:");
+        await sendMessage(chatId, "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد:");
       } else {
         await finishAirCalc(chatId, nextData, "cash", 3500000);
       }
@@ -2819,8 +2942,8 @@ async function manualText(
   }
 
   if (d.type === "AIR" && s.state === "MAN_AIR_LOAN_PROFIT") {
-    if (v < 5000000 || v > 6000000) {
-      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد.");
+    if (v < 2000000 || v > 2500000) {
+      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد.");
       return true;
     }
     await finishAirCalc(chatId, d, "loan", v);
@@ -2946,7 +3069,7 @@ async function manualText(
         await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", nextData);
         await sendMessage(
           chatId,
-          "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
+          "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد:"
         );
       } else {
         await saveSession(chatId, "MAN_BUS_PROFIT", nextData);
@@ -3016,8 +3139,8 @@ async function manualText(
 
   /* محاسبه اتوبوسی: سود طرح الماس */
   if (d.type === "BUS" && s.state === "MAN_BUS_LOAN_PROFIT") {
-    if (v < 5000000 || v > 6000000) {
-      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد.");
+    if (v < 2000000 || v > 2500000) {
+      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد.");
       return true;
     }
 
@@ -3883,6 +4006,51 @@ async function handleCallback(
     cb.id
   );
 
+  // مدیریت وضعیت وام الماس — فقط مدیر
+  if (data === "ADMIN_DIAMOND_STATUS" || data === "ADMIN_DIAMOND_ENABLE" || data === "ADMIN_DIAMOND_DISABLE") {
+    if (!isAdmin(chatId, cb?.from?.id)) {
+      await sendMessage(chatId, "⛔ این بخش فقط برای مدیر قابل استفاده است.");
+      return;
+    }
+
+    if (data === "ADMIN_DIAMOND_STATUS") {
+      const enabled = Boolean(diamondEnabledCache);
+      await sendMessage(
+        chatId,
+        `💎 مدیریت وضعیت وام الماس\n\nوضعیت فعلی: ${enabled ? "🟢 فعال" : "🔴 غیرفعال"}\n\n🔒 این بخش فقط برای مدیر نمایش داده می‌شود.\n\nبا فعال بودن، مشتری می‌تواند درخواست جدید طرح الماس ثبت کند؛ با غیرفعال بودن، درخواست جدید وام متوقف و مشتری به سفر نقدی هدایت می‌شود.`,
+        { inline_keyboard: [
+          [{ text: "🟢 فعال‌سازی وام الماس", callback_data: "ADMIN_DIAMOND_ENABLE" }],
+          [{ text: "🔴 توقف موقت وام الماس", callback_data: "ADMIN_DIAMOND_DISABLE" }],
+          [{ text: "🔄 بروزرسانی وضعیت", callback_data: "ADMIN_DIAMOND_STATUS" }],
+          [{ text: "🔙 بازگشت به محاسبات", callback_data: "ADMIN_CALC_EXIT" }]
+        ]}
+      );
+      return;
+    }
+
+    if (data === "ADMIN_DIAMOND_ENABLE") {
+      const saved = await setDiamondEnabled(true);
+      await sendMessage(
+        chatId,
+        saved
+          ? "🟢 طرح الماس با موفقیت فعال شد.\n\nاز این لحظه مشتریان می‌توانند درخواست جدید طرح الماس ثبت کنند."
+          : "🟢 طرح الماس فعال شد، اما ذخیره دائمی در پایگاه‌داده انجام نشد. لطفاً وضعیت دیتابیس را بررسی کنید.",
+        { inline_keyboard: [[{text:"💎 مدیریت وام الماس",callback_data:"ADMIN_DIAMOND_STATUS"}],[{text:"🔙 محاسبات مدیر",callback_data:"ADMIN_CALC_EXIT"}]] }
+      );
+      return;
+    }
+
+    const saved = await setDiamondEnabled(false);
+    await sendMessage(
+      chatId,
+      saved
+        ? "🔴 طرح الماس موقتاً غیرفعال شد.\n\nدرخواست‌های جدید وام ثبت نمی‌شوند و مشتریان به خدمات سفر نقدی هدایت خواهند شد.\n\nدرخواست‌های قبلی و اطلاعات آن‌ها حفظ می‌شوند."
+        : "🔴 طرح الماس غیرفعال شد، اما ذخیره دائمی در پایگاه‌داده انجام نشد. لطفاً وضعیت دیتابیس را بررسی کنید.",
+      { inline_keyboard: [[{text:"💎 مدیریت وام الماس",callback_data:"ADMIN_DIAMOND_STATUS"}],[{text:"🔙 محاسبات مدیر",callback_data:"ADMIN_CALC_EXIT"}]] }
+    );
+    return;
+  }
+
   if (data.startsWith("FEEDBACK_RATE:")) {
     const parts = data.split(":");
     const step = Number(parts[1]);
@@ -4010,6 +4178,11 @@ async function handleCallback(
     return;
   }
 
+  if (data === "DIAMOND_CASH_TOURS") {
+    await sendMessage(chatId, "🚌 خدمات سفر نقدی\n\nلطفاً نوع سفر موردنظر را انتخاب کنید:", tourMenu());
+    return;
+  }
+
   /*
    * =======================================================
    * تورها
@@ -4043,6 +4216,11 @@ async function handleCallback(
       data ===
         "TOUR_PAYMENT_LOAN"
     ) {
+      if (data === "TOUR_PAYMENT_LOAN" && !diamondEnabledCache) {
+        await sendMessage(chatId, diamondUnavailableText(), diamondUnavailableKeyboard());
+        return;
+      }
+
       const s =
         await getSession(
           chatId
@@ -4756,6 +4934,12 @@ async function handleCallback(
             "بدون اجاره"
         });
 
+      // در طرح الماس ریلی، قبل از ذخیره/نمایش نتیجه، درصد تأمین را از مدیر می‌گیریم.
+      if (data === "RAIL_PAYMENT_LOAN") {
+        await showDiamondRatioSelection(chatId, d, result);
+        return;
+      }
+
       /*
        * ذخیره محاسبه داخل درخواست
        */
@@ -4881,7 +5065,7 @@ ${e.message}`
       await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", d);
       await sendMessage(
         chatId,
-        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
+        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد:"
       );
     }
 
@@ -4923,7 +5107,7 @@ ${e.message}`
 
       await sendMessage(
         chatId,
-        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
+        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد:"
       );
     }
 
@@ -5303,6 +5487,7 @@ app.get(
 (async () => {
   try {
     await initDB();
+    await loadDiamondEnabledAtStartup();
 
     app.listen(
       CONFIG.PORT,

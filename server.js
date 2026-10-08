@@ -222,6 +222,11 @@ async function initDB() {
     )
   `);
 
+  await pool.query(
+    `INSERT INTO bot_settings(key,value) VALUES('diamond_loan_enabled','false')
+     ON CONFLICT(key) DO NOTHING`
+  );
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS requests(
       id SERIAL PRIMARY KEY,
@@ -243,11 +248,18 @@ async function initDB() {
 
 
 async function getDiamondEnabled() {
-  const r = await pool.query(
-    "SELECT value FROM bot_settings WHERE key='diamond_loan_enabled' LIMIT 1"
-  );
-  if (!r.rows.length) return false;
-  return String(r.rows[0].value).toLowerCase() === "true";
+  try {
+    const r = await pool.query(
+      "SELECT value FROM bot_settings WHERE key='diamond_loan_enabled' LIMIT 1"
+    );
+    if (!r.rows.length) return false;
+    return String(r.rows[0].value).toLowerCase() === "true";
+  } catch (e) {
+    console.error("Diamond status read error:", e);
+    // در صورت خطای موقت دیتابیس، طرح الماس غیرفعال در نظر گرفته می‌شود
+    // تا فرم سفر نقدی همچنان بدون توقف کار کند.
+    return false;
+  }
 }
 
 async function setDiamondEnabled(enabled) {

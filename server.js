@@ -42,11 +42,41 @@ const NEED_PASSENGER_LIST = [
  * =========================================================
  */
 
-function isAdmin(chatId, userId = null) {
-  const adminId = String(CONFIG.ADMIN_CHAT_ID || "").trim();
+function getActorId(obj) {
+  return String(
+    obj?.from?.id ??
+    obj?.from?.user_id ??
+    obj?.sender?.id ??
+    obj?.sender?.user_id ??
+    obj?.user?.id ??
+    obj?.user?.user_id ??
+    ""
+  ).trim();
+}
+
+function isAdmin(chatId, userId = null, username = null) {
+  const adminId = String(
+    process.env.ADMIN_USER_ID ||
+    CONFIG.ADMIN_USER_ID ||
+    CONFIG.ADMIN_CHAT_ID ||
+    ""
+  ).trim();
+
   const c = String(chatId || "").trim();
   const u = String(userId || "").trim();
-  return Boolean(adminId) && (c === adminId || u === adminId);
+  const un = String(username || "").trim().replace(/^@/, "").toLowerCase();
+  const adminUsername = String(
+    process.env.ADMIN_USERNAME ||
+    CONFIG.ADMIN_USERNAME ||
+    ""
+  ).trim().replace(/^@/, "").toLowerCase();
+
+  if (!adminId && !adminUsername) return false;
+
+  return (
+    (adminId && (c === adminId || u === adminId)) ||
+    (adminUsername && un && un === adminUsername)
+  );
 }
 
 function en(v) {
@@ -259,6 +289,10 @@ async function initDB() {
 
 let diamondEnabledCache = false;
 
+// کش کوتاه‌مدت نشست‌ها برای جلوگیری از گیر کردن فرم مشتری
+// در صورت کندی لحظه‌ای PostgreSQL، مرحله فعلی کاربر از بین نمی‌رود.
+const runtimeSessions = new Map();
+
 async function loadDiamondEnabledAtStartup() {
   try {
     const r = await withTimeout(
@@ -369,12 +403,26 @@ function diamondUnavailableKeyboard() {
 }
 
 async function getSession(id) {
-  const r = await pool.query(
-    "SELECT * FROM sessions WHERE user_id=$1",
-    [String(id)]
-  );
+  const key = String(id);
+  const cached = runtimeSessions.get(key);
+  if (cached) return cached;
 
-  return r.rows[0] || null;
+  try {
+    const r = await withTimeout(
+      pool.query(
+        "SELECT * FROM sessions WHERE user_id=$1",
+        [key]
+      ),
+      2500
+    );
+
+    const row = r.rows[0] || null;
+    if (row) runtimeSessions.set(key, row);
+    return row;
+  } catch (e) {
+    console.error("getSession error:", e.message);
+    return null;
+  }
 }
 
 async function saveSession(
@@ -382,32 +430,59 @@ async function saveSession(
   state,
   data = {}
 ) {
-  await pool.query(
-    `INSERT INTO sessions(
-      user_id,
-      state,
-      data,
-      updated_at
-    )
-    VALUES($1,$2,$3,NOW())
-    ON CONFLICT(user_id)
-    DO UPDATE SET
-      state=EXCLUDED.state,
-      data=EXCLUDED.data,
-      updated_at=NOW()`,
-    [
-      String(id),
-      state,
-      JSON.stringify(data)
-    ]
-  );
+  const key = String(id);
+  const row = {
+    user_id: key,
+    state,
+    data
+  };
+
+  // اول حافظه را به‌روز می‌کنیم تا پیام بعدی کاربر معطل دیتابیس نشود.
+  runtimeSessions.set(key, row);
+
+  try {
+    await withTimeout(
+      pool.query(
+        `INSERT INTO sessions(
+          user_id,
+          state,
+          data,
+          updated_at
+        )
+        VALUES($1,$2,$3,NOW())
+        ON CONFLICT(user_id)
+        DO UPDATE SET
+          state=EXCLUDED.state,
+          data=EXCLUDED.data,
+          updated_at=NOW()`,
+        [
+          key,
+          state,
+          JSON.stringify(data)
+        ]
+      ),
+      2500
+    );
+  } catch (e) {
+    console.error("saveSession error:", e.message);
+    // نشست در حافظه باقی می‌ماند تا فرم مشتری متوقف نشود.
+  }
 }
 
 async function clearSession(id) {
-  await pool.query(
-    "DELETE FROM sessions WHERE user_id=$1",
-    [String(id)]
-  );
+  const key = String(id);
+  runtimeSessions.delete(key);
+  try {
+    await withTimeout(
+      pool.query(
+        "DELETE FROM sessions WHERE user_id=$1",
+        [key]
+      ),
+      2500
+    );
+  } catch (e) {
+    console.error("clearSession error:", e.message);
+  }
 }
 
 /*
@@ -1047,16 +1122,11 @@ async function askPayment(
   chatId,
   d
 ) {
-  // ذخیره مرحله پرداخت نباید رابط کاربر را متوقف کند.
-  // ذخیره در دیتابیس در پس‌زمینه انجام می‌شود تا بعد از تعداد کودک
-  // بلافاصله دکمه‌های نوع پرداخت برای مشتری نمایش داده شوند.
-  saveSession(chatId, "TOUR_PAYMENT", d).catch((e) =>
-    console.error("TOUR_PAYMENT session save error:", e.message)
-  );
+  // این مرحله باید حتی در صورت کندی دیتابیس هم فوراً به مشتری پاسخ بدهد.
+  await saveSession(chatId, "TOUR_PAYMENT", d);
 
-  // برای اینکه مرحله فرم مشتری به دیتابیس وابسته نباشد، وضعیت کش‌شده را می‌خوانیم.
-  // وضعیت کش در شروع ربات از دیتابیس بارگذاری می‌شود و با فعال/غیرفعال کردن مدیر فوراً تغییر می‌کند.
   const enabled = Boolean(diamondEnabledCache);
+
   const rows = [
     [
       {
@@ -1082,13 +1152,23 @@ async function askPayment(
     }
   ]);
 
-  await sendMessage(
-    chatId,
-    "💳 نوع پرداخت را انتخاب کنید:",
-    { inline_keyboard: rows }
-  );
+  try {
+    await sendMessage(
+      chatId,
+      enabled
+        ? "💳 نوع پرداخت را انتخاب کنید:"
+        : "💳 نوع پرداخت را انتخاب کنید:\n\n💎 در حال حاضر امکان ثبت درخواست جدید طرح الماس وجود ندارد و فقط پرداخت نقدی فعال است.",
+      { inline_keyboard: rows }
+    );
+  } catch (e) {
+    console.error("askPayment send error:", e.message);
+    // حتی اگر ارسال دکمه‌ها خطا داد، کاربر باید یک پاسخ قابل مشاهده دریافت کند.
+    await sendMessage(
+      chatId,
+      "💳 نوع پرداخت:\n\n💵 پرداخت نقدی را انتخاب کنید یا برای ادامه /start را بفرستید."
+    );
+  }
 }
-
 async function askName(
   chatId,
   d
@@ -3997,7 +4077,10 @@ async function handleCallback(
 
   const chatId =
     String(
-      cb?.message?.chat?.id || ""
+      cb?.message?.chat?.id ||
+      cb?.chat?.id ||
+      getActorId(cb) ||
+      ""
     );
 
   if (!chatId) return;
@@ -4008,15 +4091,22 @@ async function handleCallback(
 
   // مدیریت وضعیت وام الماس — فقط مدیر
   if (data === "ADMIN_DIAMOND_STATUS" || data === "ADMIN_DIAMOND_ENABLE" || data === "ADMIN_DIAMOND_DISABLE") {
-    if (!isAdmin(chatId, cb?.from?.id)) {
+    const actorId = getActorId(cb);
+    const actorUsername = getUsername(cb);
+
+    if (!isAdmin(chatId, actorId, actorUsername)) {
       await sendMessage(chatId, "⛔ این بخش فقط برای مدیر قابل استفاده است.");
       return;
     }
 
+    // اگر دکمه در گروه مدیران فشرده شده باشد، پاسخ در همان گروه می‌رود.
+    // اگر در پیام خصوصی مدیر باشد، همان چت خصوصی استفاده می‌شود.
+    const adminReplyChatId = chatId || actorId;
+
     if (data === "ADMIN_DIAMOND_STATUS") {
       const enabled = Boolean(diamondEnabledCache);
       await sendMessage(
-        chatId,
+        adminReplyChatId,
         `💎 مدیریت وضعیت وام الماس\n\nوضعیت فعلی: ${enabled ? "🟢 فعال" : "🔴 غیرفعال"}\n\n🔒 این بخش فقط برای مدیر نمایش داده می‌شود.\n\nبا فعال بودن، مشتری می‌تواند درخواست جدید طرح الماس ثبت کند؛ با غیرفعال بودن، درخواست جدید وام متوقف و مشتری به سفر نقدی هدایت می‌شود.`,
         { inline_keyboard: [
           [{ text: "🟢 فعال‌سازی وام الماس", callback_data: "ADMIN_DIAMOND_ENABLE" }],
@@ -4031,7 +4121,7 @@ async function handleCallback(
     if (data === "ADMIN_DIAMOND_ENABLE") {
       const saved = await setDiamondEnabled(true);
       await sendMessage(
-        chatId,
+        adminReplyChatId,
         saved
           ? "🟢 طرح الماس با موفقیت فعال شد.\n\nاز این لحظه مشتریان می‌توانند درخواست جدید طرح الماس ثبت کنند."
           : "🟢 طرح الماس فعال شد، اما ذخیره دائمی در پایگاه‌داده انجام نشد. لطفاً وضعیت دیتابیس را بررسی کنید.",
@@ -4042,7 +4132,7 @@ async function handleCallback(
 
     const saved = await setDiamondEnabled(false);
     await sendMessage(
-      chatId,
+      adminReplyChatId,
       saved
         ? "🔴 طرح الماس موقتاً غیرفعال شد.\n\nدرخواست‌های جدید وام ثبت نمی‌شوند و مشتریان به خدمات سفر نقدی هدایت خواهند شد.\n\nدرخواست‌های قبلی و اطلاعات آن‌ها حفظ می‌شوند."
         : "🔴 طرح الماس غیرفعال شد، اما ذخیره دائمی در پایگاه‌داده انجام نشد. لطفاً وضعیت دیتابیس را بررسی کنید.",

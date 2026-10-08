@@ -2946,7 +2946,7 @@ async function manualText(
         await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", nextData);
         await sendMessage(
           chatId,
-          "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
+          "💎 سود هر نفر برای طرح الماس تور اتوبوسی را وارد کنید.\n\nمبلغ باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد:"
         );
       } else {
         await saveSession(chatId, "MAN_BUS_PROFIT", nextData);
@@ -3016,8 +3016,8 @@ async function manualText(
 
   /* محاسبه اتوبوسی: سود طرح الماس */
   if (d.type === "BUS" && s.state === "MAN_BUS_LOAN_PROFIT") {
-    if (v < 5000000 || v > 6000000) {
-      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد.");
+    if (v < 2000000 || v > 2500000) {
+      await sendMessage(chatId, "❌ سود طرح الماس برای تور اتوبوسی باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد.");
       return true;
     }
 
@@ -4756,6 +4756,15 @@ async function handleCallback(
             "بدون اجاره"
         });
 
+      if (data === "RAIL_PAYMENT_LOAN") {
+        await showDiamondRatioSelection(
+          chatId,
+          { ...d, type: "RAIL" },
+          { ...result, type: "RAIL" }
+        );
+        return;
+      }
+
       /*
        * ذخیره محاسبه داخل درخواست
        */
@@ -4881,7 +4890,7 @@ ${e.message}`
       await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", d);
       await sendMessage(
         chatId,
-        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
+        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد:"
       );
     }
 

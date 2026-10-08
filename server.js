@@ -42,8 +42,11 @@ const NEED_PASSENGER_LIST = [
  * =========================================================
  */
 
-function isAdmin(chatId) {
-  return String(chatId) === String(CONFIG.ADMIN_CHAT_ID);
+function isAdmin(chatId, userId = null) {
+  const adminId = String(CONFIG.ADMIN_CHAT_ID || "").trim();
+  const c = String(chatId || "").trim();
+  const u = String(userId || "").trim();
+  return Boolean(adminId) && (c === adminId || u === adminId);
 }
 
 function en(v) {
@@ -1044,10 +1047,11 @@ async function askPayment(
   chatId,
   d
 ) {
-  await saveSession(
-    chatId,
-    "TOUR_PAYMENT",
-    d
+  // ذخیره مرحله پرداخت نباید رابط کاربر را متوقف کند.
+  // ذخیره در دیتابیس در پس‌زمینه انجام می‌شود تا بعد از تعداد کودک
+  // بلافاصله دکمه‌های نوع پرداخت برای مشتری نمایش داده شوند.
+  saveSession(chatId, "TOUR_PAYMENT", d).catch((e) =>
+    console.error("TOUR_PAYMENT session save error:", e.message)
   );
 
   // برای اینکه مرحله فرم مشتری به دیتابیس وابسته نباشد، وضعیت کش‌شده را می‌خوانیم.
@@ -4004,7 +4008,10 @@ async function handleCallback(
 
   // مدیریت وضعیت وام الماس — فقط مدیر
   if (data === "ADMIN_DIAMOND_STATUS" || data === "ADMIN_DIAMOND_ENABLE" || data === "ADMIN_DIAMOND_DISABLE") {
-    if (!isAdmin(chatId)) return;
+    if (!isAdmin(chatId, cb?.from?.id)) {
+      await sendMessage(chatId, "⛔ این بخش فقط برای مدیر قابل استفاده است.");
+      return;
+    }
 
     if (data === "ADMIN_DIAMOND_STATUS") {
       const enabled = Boolean(diamondEnabledCache);

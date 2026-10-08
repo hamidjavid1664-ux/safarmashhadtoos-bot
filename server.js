@@ -4,9 +4,6 @@ const { Pool } = require("pg");
 const CONFIG = require("./config");
 const PRICING = require("./pricing");
 
-// شناسه مدیر را اول از Environment و سپس از config می‌خوانیم.
-const ADMIN_CHAT_ID = String(process.env.ADMIN_CHAT_ID || CONFIG.ADMIN_CHAT_ID || "").trim();
-
 const app = express();
 
 app.use(express.json({ limit: "20mb" }));
@@ -45,11 +42,8 @@ const NEED_PASSENGER_LIST = [
  * =========================================================
  */
 
-function isAdmin(chatId, userId = null) {
-  const adminId = ADMIN_CHAT_ID;
-  const c = String(chatId || "").trim();
-  const u = String(userId || "").trim();
-  return Boolean(adminId) && (c === adminId || u === adminId);
+function isAdmin(chatId) {
+  return String(chatId) === String(CONFIG.ADMIN_CHAT_ID);
 }
 
 function en(v) {
@@ -228,18 +222,6 @@ async function initDB() {
     )
   `);
 
-  await pool.query(
-    `INSERT INTO bot_settings(key,value) VALUES('diamond_loan_enabled','false')
-     ON CONFLICT(key) DO NOTHING`
-  );
-
-  try {
-    const dr = await pool.query("SELECT value FROM bot_settings WHERE key='diamond_loan_enabled' LIMIT 1");
-    if (dr.rows.length) diamondEnabledCache = String(dr.rows[0].value).toLowerCase() === "true";
-  } catch (e) {
-    console.error("Diamond cache init error:", e.message);
-  }
-
   await pool.query(`
     CREATE TABLE IF NOT EXISTS requests(
       id SERIAL PRIMARY KEY,
@@ -258,92 +240,6 @@ async function initDB() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-
-
-let diamondEnabledCache = false;
-
-async function loadDiamondEnabledAtStartup() {
-  try {
-    const r = await withTimeout(
-      pool.query("SELECT value FROM bot_settings WHERE key='diamond_loan_enabled' LIMIT 1"),
-      2500
-    );
-    if (r.rows.length) {
-      diamondEnabledCache = String(r.rows[0].value).toLowerCase() === "true";
-    }
-  } catch (e) {
-    console.error("Diamond startup status read error:", e.message);
-  }
-}
-
-function withTimeout(promise, ms = 2500) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("database timeout")), ms))
-  ]);
-}
-
-async function getDiamondEnabled() {
-  try {
-    const r = await withTimeout(
-      pool.query(
-        "SELECT value FROM bot_settings WHERE key='diamond_loan_enabled' LIMIT 1"
-      ),
-      2500
-    );
-    if (!r.rows.length) return diamondEnabledCache;
-    diamondEnabledCache = String(r.rows[0].value).toLowerCase() === "true";
-    return diamondEnabledCache;
-  } catch (e) {
-    console.error("Diamond status read error:", e.message);
-    return diamondEnabledCache;
-  }
-}
-
-async function setDiamondEnabled(enabled) {
-  diamondEnabledCache = Boolean(enabled);
-  try {
-    await withTimeout(
-      pool.query(
-        `INSERT INTO bot_settings(key,value) VALUES('diamond_loan_enabled',$1)
-         ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
-        [enabled ? "true" : "false"]
-      ),
-      2500
-    );
-    return true;
-  } catch (e) {
-    console.error("Diamond status save error:", e.message);
-    return false;
-  }
-}
-
-function diamondUnavailableText() {
-  return `💎 اطلاعیه مهم درباره طرح الماس شهر بهشت
-
-همراه گرامی، زائر محترم امام رضا (ع) 🌷
-
-با توجه به تکمیل ظرفیت فعلی تخصیص اعتبار طرح الماس، در حال حاضر امکان اختصاص وام برای ثبت درخواست‌های جدید فراهم نیست.
-
-⏳ این محدودیت موقتی است و فعال‌شدن مجدد طرح، منوط به تأمین اعتبار توسط سرمایه‌گذار و اعلام ظرفیت جدید خواهد بود.
-
-🚌 خبر خوب اینکه همچنان می‌توانید از خدمات سفر نقدی شهر بهشت استفاده کنید!
-
-شما می‌توانید تورهای هوایی، ریلی و اتوبوسی مشهد و همچنین خدمات رزرو هتل را به‌صورت نقدی دریافت کنید.
-
-🙏 از اعتماد و همراهی شما سپاسگزاریم.
-
-💚 شهر بهشت | سفر هوشمندانه به مشهد مقدس`;
-}
-
-function diamondUnavailableKeyboard() {
-  return {
-    inline_keyboard: [
-      [{ text: "🚌 مشاهده تورهای نقدی", callback_data: "DIAMOND_CASH_TOURS" }],
-      [{ text: "🔙 بازگشت", callback_data: "DIAMOND_BACK" }]
-    ]
-  };
-}
 
   const cols = [
     "applicant_name",
@@ -371,22 +267,13 @@ function diamondUnavailableKeyboard() {
   }
 }
 
-const sessionMemory = new Map();
-
 async function getSession(id) {
-  const key = String(id);
-  try {
-    const r = await withTimeout(
-      pool.query("SELECT * FROM sessions WHERE user_id=$1", [key]),
-      2500
-    );
-    const row = r.rows[0] || null;
-    if (row) sessionMemory.set(key, row);
-    return row || sessionMemory.get(key) || null;
-  } catch (e) {
-    console.error("Session read fallback:", e.message);
-    return sessionMemory.get(key) || null;
-  }
+  const r = await pool.query(
+    "SELECT * FROM sessions WHERE user_id=$1",
+    [String(id)]
+  );
+
+  return r.rows[0] || null;
 }
 
 async function saveSession(
@@ -394,43 +281,32 @@ async function saveSession(
   state,
   data = {}
 ) {
-  const key = String(id);
-  const row = { user_id: key, state, data, updated_at: new Date() };
-  sessionMemory.set(key, row);
-
-  try {
-    await withTimeout(
-      pool.query(
-        `INSERT INTO sessions(
-          user_id, state, data, updated_at
-        )
-        VALUES($1,$2,$3,NOW())
-        ON CONFLICT(user_id)
-        DO UPDATE SET
-          state=EXCLUDED.state,
-          data=EXCLUDED.data,
-          updated_at=NOW()`,
-        [key, state, JSON.stringify(data)]
-      ),
-      2500
-    );
-  } catch (e) {
-    console.error("Session save fallback:", e.message);
-    // نشست در حافظه باقی می‌ماند تا فرم مشتری متوقف نشود.
-  }
+  await pool.query(
+    `INSERT INTO sessions(
+      user_id,
+      state,
+      data,
+      updated_at
+    )
+    VALUES($1,$2,$3,NOW())
+    ON CONFLICT(user_id)
+    DO UPDATE SET
+      state=EXCLUDED.state,
+      data=EXCLUDED.data,
+      updated_at=NOW()`,
+    [
+      String(id),
+      state,
+      JSON.stringify(data)
+    ]
+  );
 }
 
 async function clearSession(id) {
-  const key = String(id);
-  sessionMemory.delete(key);
-  try {
-    await withTimeout(
-      pool.query("DELETE FROM sessions WHERE user_id=$1", [key]),
-      2500
-    );
-  } catch (e) {
-    console.error("Session clear fallback:", e.message);
-  }
+  await pool.query(
+    "DELETE FROM sessions WHERE user_id=$1",
+    [String(id)]
+  );
 }
 
 /*
@@ -699,17 +575,7 @@ function diamondPlanText() {
 ☎️ پشتیبانی: ${CONFIG.CONTACT.phone}`;
 }
 
-async function sendDiamondPlan(chatId) {
-  const enabled = await getDiamondEnabled();
-
-  if (!enabled) {
-    return sendMessage(
-      chatId,
-      diamondUnavailableText(),
-      diamondUnavailableKeyboard()
-    );
-  }
-
+function sendDiamondPlan(chatId) {
   return sendMessage(
     chatId,
     diamondPlanText(),
@@ -1070,45 +936,40 @@ async function askPayment(
   chatId,
   d
 ) {
-  // ذخیره مرحله پرداخت نباید رابط کاربر را متوقف کند.
-  // ذخیره در دیتابیس در پس‌زمینه انجام می‌شود تا بعد از تعداد کودک
-  // بلافاصله دکمه‌های نوع پرداخت برای مشتری نمایش داده شوند.
-  saveSession(chatId, "TOUR_PAYMENT", d).catch((e) =>
-    console.error("TOUR_PAYMENT session save error:", e.message)
+  await saveSession(
+    chatId,
+    "TOUR_PAYMENT",
+    d
   );
-
-  // برای اینکه مرحله فرم مشتری به دیتابیس وابسته نباشد، وضعیت کش‌شده را می‌خوانیم.
-  // وضعیت کش در شروع ربات از دیتابیس بارگذاری می‌شود و با فعال/غیرفعال کردن مدیر فوراً تغییر می‌کند.
-  const enabled = Boolean(diamondEnabledCache);
-  const rows = [
-    [
-      {
-        text: "💵 پرداخت نقدی",
-        callback_data: "TOUR_PAYMENT_CASH"
-      }
-    ]
-  ];
-
-  if (enabled) {
-    rows.push([
-      {
-        text: "💎 طرح الماس شهر بهشت",
-        callback_data: "TOUR_PAYMENT_LOAN"
-      }
-    ]);
-  }
-
-  rows.push([
-    {
-      text: "🔙 بازگشت",
-      callback_data: "TOUR_BACK"
-    }
-  ]);
 
   await sendMessage(
     chatId,
     "💳 نوع پرداخت را انتخاب کنید:",
-    { inline_keyboard: rows }
+    {
+      inline_keyboard: [
+        [
+          {
+            text: "💵 پرداخت نقدی",
+            callback_data:
+              "TOUR_PAYMENT_CASH"
+          }
+        ],
+        [
+          {
+            text: "💎 طرح الماس شهر بهشت",
+            callback_data:
+              "TOUR_PAYMENT_LOAN"
+          }
+        ],
+        [
+          {
+            text: "🔙 بازگشت",
+            callback_data:
+              "TOUR_BACK"
+          }
+        ]
+      ]
+    }
   );
 }
 
@@ -1660,7 +1521,7 @@ async function submitRequest(chatId) {
   }
 
   await sendMessage(
-    ADMIN_CHAT_ID,
+    CONFIG.ADMIN_CHAT_ID,
     admin,
     {
       inline_keyboard:
@@ -1814,7 +1675,7 @@ async function finishFeedback(chatId, session) {
     ? { inline_keyboard: [[{ text: "📢 انتشار در کانال", callback_data: `FEEDBACK_PUBLISH:${reqCode}` }]] }
     : undefined;
 
-  await sendMessage(ADMIN_CHAT_ID, admin, adminKeyboard);
+  await sendMessage(CONFIG.ADMIN_CHAT_ID, admin, adminKeyboard);
 
   const update = {
     feedback: {
@@ -2030,7 +1891,7 @@ async function finishPassengerList(chatId, data) {
   }
 
   await sendMessage(
-    ADMIN_CHAT_ID,
+    CONFIG.ADMIN_CHAT_ID,
     `📋 لیست همراهان/مسافران\n🆔 درخواست: ${data.requestCode}\n👤 کاربر: ${data.applicantName || ""}\n📱 ${data.phone || ""}\n\n` +
       good.map((x, i) => `${i + 1}. ${x.name} | ${x.nationalCode} | ${x.birthDate}`).join("\n")
   );
@@ -2197,7 +2058,7 @@ ${line}`
   }
 
   await sendMessage(
-    ADMIN_CHAT_ID,
+    CONFIG.ADMIN_CHAT_ID,
     `📋 لیست همراهان/مسافران
 🆔 درخواست: ${
       session.data.requestCode
@@ -2255,14 +2116,14 @@ async function handleMedia(
   if (session?.state === "FEEDBACK_CONTENT") {
     const d = session.data || {};
     if (message.voice?.file_id) {
-      await sendVoice(ADMIN_CHAT_ID, message.voice.file_id, `🎤 پیام صوتی بازخورد\n🆔 درخواست: ${d.requestCode}`);
+      await sendVoice(CONFIG.ADMIN_CHAT_ID, message.voice.file_id, `🎤 پیام صوتی بازخورد\n🆔 درخواست: ${d.requestCode}`);
       await saveSession(chatId, "FEEDBACK_CONSENT", { ...d, voiceFileId: message.voice.file_id });
       await sendMessage(chatId, "📷 اگر عکس یادگاری دارید همین‌جا بفرستید؛ در غیر این صورت «⏭️ بدون عکس» را بزنید.", { keyboard: [[{text:"⏭️ بدون عکس"}]], resize_keyboard:true });
       return true;
     }
     if (message.photo?.length) {
       const photo = message.photo[message.photo.length - 1];
-      await sendPhoto(ADMIN_CHAT_ID, photo.file_id, `📷 عکس یادگاری بازخورد\n🆔 درخواست: ${d.requestCode}`);
+      await sendPhoto(CONFIG.ADMIN_CHAT_ID, photo.file_id, `📷 عکس یادگاری بازخورد\n🆔 درخواست: ${d.requestCode}`);
       await saveSession(chatId, "FEEDBACK_CONSENT", { ...d, photoFileId: photo.file_id });
       await sendMessage(chatId, "📢 آیا اجازه می‌دهید نظر یا عکس شما با نام کوچک در کانال «سفر مشهد توس» منتشر شود؟", { inline_keyboard: [[{text:"✅ بله، با افتخار", callback_data:"FEEDBACK_CONSENT:YES"},{text:"❌ خیر، فقط داخلی", callback_data:"FEEDBACK_CONSENT:NO"}]] });
       return true;
@@ -2272,7 +2133,7 @@ async function handleMedia(
   if (session?.state === "FEEDBACK_CONSENT" && message.photo?.length) {
     const photo = message.photo[message.photo.length - 1];
     const d = session.data || {};
-    await sendPhoto(ADMIN_CHAT_ID, photo.file_id, `📷 عکس یادگاری بازخورد\n🆔 درخواست: ${d.requestCode}`);
+    await sendPhoto(CONFIG.ADMIN_CHAT_ID, photo.file_id, `📷 عکس یادگاری بازخورد\n🆔 درخواست: ${d.requestCode}`);
     await saveSession(chatId, "FEEDBACK_CONSENT", { ...d, photoFileId: photo.file_id });
     await sendMessage(chatId, "📢 آیا اجازه می‌دهید نظر یا عکس شما با نام کوچک در کانال «سفر مشهد توس» منتشر شود؟", { inline_keyboard: [[{text:"✅ بله، با افتخار", callback_data:"FEEDBACK_CONSENT:YES"},{text:"❌ خیر، فقط داخلی", callback_data:"FEEDBACK_CONSENT:NO"}]] });
     return true;
@@ -2292,7 +2153,7 @@ async function handleMedia(
       ];
 
     await sendPhoto(
-      ADMIN_CHAT_ID,
+      CONFIG.ADMIN_CHAT_ID,
       photo.file_id,
       `🧾 رسید پرداخت
 🆔 درخواست: ${
@@ -2323,7 +2184,7 @@ async function handleMedia(
       "PAYMENT_RECEIPT"
   ) {
     await sendDocument(
-      ADMIN_CHAT_ID,
+      CONFIG.ADMIN_CHAT_ID,
       message.document.file_id,
       `🧾 رسید پرداخت
 🆔 درخواست: ${
@@ -2356,7 +2217,7 @@ async function handleMedia(
       ];
 
     await sendPhoto(
-      ADMIN_CHAT_ID,
+      CONFIG.ADMIN_CHAT_ID,
       p.file_id,
       `📋 تصویر لیست مسافران
 🆔 درخواست: ${
@@ -2391,7 +2252,7 @@ async function handleMedia(
       "PASSENGER_LIST"
   ) {
     await sendDocument(
-      ADMIN_CHAT_ID,
+      CONFIG.ADMIN_CHAT_ID,
       message.document.file_id,
       `📋 فایل لیست مسافران
 🆔 درخواست: ${
@@ -2489,13 +2350,6 @@ function managerCalcMenu(
       }
     ]);
   }
-
-  rows.push([
-    {
-      text: "💎 مدیریت وام الماس",
-      callback_data: "ADMIN_DIAMOND_STATUS"
-    }
-  ]);
 
   rows.push([
     {
@@ -2966,7 +2820,7 @@ async function manualText(
 
   if (d.type === "AIR" && s.state === "MAN_AIR_LOAN_PROFIT") {
     if (v < 5000000 || v > 6000000) {
-      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد.");
+      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد.");
       return true;
     }
     await finishAirCalc(chatId, d, "loan", v);
@@ -3092,7 +2946,7 @@ async function manualText(
         await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", nextData);
         await sendMessage(
           chatId,
-          "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد:"
+          "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
         );
       } else {
         await saveSession(chatId, "MAN_BUS_PROFIT", nextData);
@@ -3163,7 +3017,7 @@ async function manualText(
   /* محاسبه اتوبوسی: سود طرح الماس */
   if (d.type === "BUS" && s.state === "MAN_BUS_LOAN_PROFIT") {
     if (v < 5000000 || v > 6000000) {
-      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد.");
+      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد.");
       return true;
     }
 
@@ -4029,51 +3883,6 @@ async function handleCallback(
     cb.id
   );
 
-  // مدیریت وضعیت وام الماس — فقط مدیر
-  if (data === "ADMIN_DIAMOND_STATUS" || data === "ADMIN_DIAMOND_ENABLE" || data === "ADMIN_DIAMOND_DISABLE") {
-    if (!isAdmin(chatId, cb?.from?.id)) {
-      await sendMessage(chatId, "⛔ این بخش فقط برای مدیر قابل استفاده است.");
-      return;
-    }
-
-    if (data === "ADMIN_DIAMOND_STATUS") {
-      const enabled = Boolean(diamondEnabledCache);
-      await sendMessage(
-        chatId,
-        `💎 مدیریت وضعیت وام الماس\n\nوضعیت فعلی: ${enabled ? "🟢 فعال" : "🔴 غیرفعال"}\n\n🔒 این بخش فقط برای مدیر نمایش داده می‌شود.\n\nبا فعال بودن، مشتری می‌تواند درخواست جدید طرح الماس ثبت کند؛ با غیرفعال بودن، درخواست جدید وام متوقف و مشتری به سفر نقدی هدایت می‌شود.`,
-        { inline_keyboard: [
-          [{ text: "🟢 فعال‌سازی وام الماس", callback_data: "ADMIN_DIAMOND_ENABLE" }],
-          [{ text: "🔴 توقف موقت وام الماس", callback_data: "ADMIN_DIAMOND_DISABLE" }],
-          [{ text: "🔄 بروزرسانی وضعیت", callback_data: "ADMIN_DIAMOND_STATUS" }],
-          [{ text: "🔙 بازگشت به محاسبات", callback_data: "ADMIN_CALC_EXIT" }]
-        ]}
-      );
-      return;
-    }
-
-    if (data === "ADMIN_DIAMOND_ENABLE") {
-      const saved = await setDiamondEnabled(true);
-      await sendMessage(
-        chatId,
-        saved
-          ? "🟢 طرح الماس با موفقیت فعال شد.\n\nاز این لحظه مشتریان می‌توانند درخواست جدید طرح الماس ثبت کنند."
-          : "🟢 طرح الماس فعال شد، اما ذخیره دائمی در پایگاه‌داده انجام نشد. لطفاً وضعیت دیتابیس را بررسی کنید.",
-        { inline_keyboard: [[{text:"💎 مدیریت وام الماس",callback_data:"ADMIN_DIAMOND_STATUS"}],[{text:"🔙 محاسبات مدیر",callback_data:"ADMIN_CALC_EXIT"}]] }
-      );
-      return;
-    }
-
-    const saved = await setDiamondEnabled(false);
-    await sendMessage(
-      chatId,
-      saved
-        ? "🔴 طرح الماس موقتاً غیرفعال شد.\n\nدرخواست‌های جدید وام ثبت نمی‌شوند و مشتریان به خدمات سفر نقدی هدایت خواهند شد.\n\nدرخواست‌های قبلی و اطلاعات آن‌ها حفظ می‌شوند."
-        : "🔴 طرح الماس غیرفعال شد، اما ذخیره دائمی در پایگاه‌داده انجام نشد. لطفاً وضعیت دیتابیس را بررسی کنید.",
-      { inline_keyboard: [[{text:"💎 مدیریت وام الماس",callback_data:"ADMIN_DIAMOND_STATUS"}],[{text:"🔙 محاسبات مدیر",callback_data:"ADMIN_CALC_EXIT"}]] }
-    );
-    return;
-  }
-
   if (data.startsWith("FEEDBACK_RATE:")) {
     const parts = data.split(":");
     const step = Number(parts[1]);
@@ -4114,7 +3923,7 @@ async function handleCallback(
     );
 
     if (!rr.rows.length) {
-      await sendMessage(ADMIN_CHAT_ID, "❌ اطلاعات بازخورد این درخواست پیدا نشد.");
+      await sendMessage(CONFIG.ADMIN_CHAT_ID, "❌ اطلاعات بازخورد این درخواست پیدا نشد.");
       return;
     }
 
@@ -4122,12 +3931,12 @@ async function handleCallback(
     const feedback = req.payload?.feedback || {};
 
     if (feedback.consent !== true) {
-      await sendMessage(ADMIN_CHAT_ID, "❌ این مشتری اجازه انتشار در کانال را نداده است.");
+      await sendMessage(CONFIG.ADMIN_CHAT_ID, "❌ این مشتری اجازه انتشار در کانال را نداده است.");
       return;
     }
 
     if (feedback.channelPublished === true) {
-      await sendMessage(ADMIN_CHAT_ID, "ℹ️ این بازخورد قبلاً در کانال منتشر شده است.");
+      await sendMessage(CONFIG.ADMIN_CHAT_ID, "ℹ️ این بازخورد قبلاً در کانال منتشر شده است.");
       return;
     }
 
@@ -4158,7 +3967,7 @@ async function handleCallback(
     } catch (e) {
       console.error("❌ Channel publish error:", e.message);
       await sendMessage(
-        ADMIN_CHAT_ID,
+        CONFIG.ADMIN_CHAT_ID,
         `❌ انتشار در کانال انجام نشد.\n\nخطای بله: ${e.message}\n\n🔧 اگر ربات ادمین کانال است، مقدار CHANNEL_ID کانال را در تنظیمات Render قرار دهید.`
       );
       return;
@@ -4177,7 +3986,7 @@ async function handleCallback(
       })]
     );
 
-    await sendMessage(ADMIN_CHAT_ID, `✅ بازخورد درخواست ${code} با نام «${firstName}» با موفقیت در کانال منتشر شد.`);
+    await sendMessage(CONFIG.ADMIN_CHAT_ID, `✅ بازخورد درخواست ${code} با نام «${firstName}» با موفقیت در کانال منتشر شد.`);
     return;
   }
 
@@ -4198,11 +4007,6 @@ async function handleCallback(
     if (!rr.rows.length) { await sendMessage(chatId, "❌ درخواست پیدا نشد."); return; }
     await startFeedback(rr.rows[0]);
     await sendMessage(chatId, `💬 بازخورد مشتری برای درخواست ${code} شروع شد.`);
-    return;
-  }
-
-  if (data === "DIAMOND_CASH_TOURS") {
-    await sendMessage(chatId, "🚌 خدمات سفر نقدی\n\nلطفاً نوع سفر موردنظر را انتخاب کنید:", tourMenu());
     return;
   }
 
@@ -4239,11 +4043,6 @@ async function handleCallback(
       data ===
         "TOUR_PAYMENT_LOAN"
     ) {
-      if (data === "TOUR_PAYMENT_LOAN" && !diamondEnabledCache) {
-        await sendMessage(chatId, diamondUnavailableText(), diamondUnavailableKeyboard());
-        return;
-      }
-
       const s =
         await getSession(
           chatId
@@ -4957,12 +4756,6 @@ async function handleCallback(
             "بدون اجاره"
         });
 
-      // در طرح الماس ریلی، قبل از ذخیره/نمایش نتیجه، درصد تأمین را از مدیر می‌گیریم.
-      if (data === "RAIL_PAYMENT_LOAN") {
-        await showDiamondRatioSelection(chatId, d, result);
-        return;
-      }
-
       /*
        * ذخیره محاسبه داخل درخواست
        */
@@ -5088,7 +4881,7 @@ ${e.message}`
       await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", d);
       await sendMessage(
         chatId,
-        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد:"
+        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
       );
     }
 
@@ -5510,7 +5303,6 @@ app.get(
 (async () => {
   try {
     await initDB();
-    await loadDiamondEnabledAtStartup();
 
     app.listen(
       CONFIG.PORT,

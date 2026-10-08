@@ -3958,6 +3958,37 @@ async function handleCallback(
     cb.id
   );
 
+  // مدیریت وام الماس: این بخش عمداً در ابتدای callbackها قرار گرفته تا
+  // هیچ مسیر دیگری جلوی دکمه‌های فعال/غیرفعال را نگیرد.
+  if (data === "ADMIN_DIAMOND_STATUS" || data === "ADMIN_DIAMOND_ENABLE" || data === "ADMIN_DIAMOND_DISABLE") {
+    if (!isAdmin(chatId)) return;
+
+    if (data === "ADMIN_DIAMOND_STATUS") {
+      const enabled = await getDiamondEnabled();
+      await sendMessage(
+        chatId,
+        `💎 مدیریت وضعیت وام الماس\n\nوضعیت فعلی: ${enabled ? "🟢 فعال" : "🔴 غیرفعال"}\n\n🔒 این بخش فقط برای مدیر نمایش داده می‌شود.\n\nدر صورت غیرفعال بودن، درخواست‌های جدید وام متوقف می‌شوند و مشتری به خدمات سفر نقدی هدایت می‌شود.`,
+        { inline_keyboard: [
+          [{ text: "🟢 فعال‌سازی وام الماس", callback_data: "ADMIN_DIAMOND_ENABLE" }],
+          [{ text: "🔴 توقف موقت وام الماس", callback_data: "ADMIN_DIAMOND_DISABLE" }],
+          [{ text: "🔄 بروزرسانی وضعیت", callback_data: "ADMIN_DIAMOND_STATUS" }],
+          [{ text: "🔙 بازگشت به محاسبات", callback_data: "ADMIN_CALC_EXIT" }]
+        ]}
+      );
+      return;
+    }
+
+    if (data === "ADMIN_DIAMOND_ENABLE") {
+      await setDiamondEnabled(true);
+      await sendMessage(chatId, "🟢 طرح الماس با موفقیت فعال شد.\n\nاز این لحظه مشتریان می‌توانند درخواست جدید طرح الماس ثبت کنند.", { inline_keyboard: [[{text:"💎 مدیریت وام الماس",callback_data:"ADMIN_DIAMOND_STATUS"}],[{text:"🔙 محاسبات مدیر",callback_data:"ADMIN_CALC_EXIT"}]] });
+      return;
+    }
+
+    await setDiamondEnabled(false);
+    await sendMessage(chatId, "🔴 طرح الماس موقتاً غیرفعال شد.\n\nدرخواست‌های جدید وام ثبت نمی‌شوند و مشتریان به خدمات سفر نقدی هدایت خواهند شد.\n\nدرخواست‌های قبلی و اطلاعات آن‌ها حفظ می‌شوند.", { inline_keyboard: [[{text:"💎 مدیریت وام الماس",callback_data:"ADMIN_DIAMOND_STATUS"}],[{text:"🔙 محاسبات مدیر",callback_data:"ADMIN_CALC_EXIT"}]] });
+    return;
+  }
+
   if (data.startsWith("FEEDBACK_RATE:")) {
     const parts = data.split(":");
     const step = Number(parts[1]);

@@ -227,6 +227,13 @@ async function initDB() {
      ON CONFLICT(key) DO NOTHING`
   );
 
+  try {
+    const dr = await pool.query("SELECT value FROM bot_settings WHERE key='diamond_loan_enabled' LIMIT 1");
+    if (dr.rows.length) diamondEnabledCache = String(dr.rows[0].value).toLowerCase() === "true";
+  } catch (e) {
+    console.error("Diamond cache init error:", e.message);
+  }
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS requests(
       id SERIAL PRIMARY KEY,
@@ -247,27 +254,48 @@ async function initDB() {
   `);
 
 
+let diamondEnabledCache = false;
+
+function withTimeout(promise, ms = 2500) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("database timeout")), ms))
+  ]);
+}
+
 async function getDiamondEnabled() {
   try {
-    const r = await pool.query(
-      "SELECT value FROM bot_settings WHERE key='diamond_loan_enabled' LIMIT 1"
+    const r = await withTimeout(
+      pool.query(
+        "SELECT value FROM bot_settings WHERE key='diamond_loan_enabled' LIMIT 1"
+      ),
+      2500
     );
-    if (!r.rows.length) return false;
-    return String(r.rows[0].value).toLowerCase() === "true";
+    if (!r.rows.length) return diamondEnabledCache;
+    diamondEnabledCache = String(r.rows[0].value).toLowerCase() === "true";
+    return diamondEnabledCache;
   } catch (e) {
-    console.error("Diamond status read error:", e);
-    // در صورت خطای موقت دیتابیس، طرح الماس غیرفعال در نظر گرفته می‌شود
-    // تا فرم سفر نقدی همچنان بدون توقف کار کند.
-    return false;
+    console.error("Diamond status read error:", e.message);
+    return diamondEnabledCache;
   }
 }
 
 async function setDiamondEnabled(enabled) {
-  await pool.query(
-    `INSERT INTO bot_settings(key,value) VALUES('diamond_loan_enabled',$1)
-     ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
-    [enabled ? "true" : "false"]
-  );
+  diamondEnabledCache = Boolean(enabled);
+  try {
+    await withTimeout(
+      pool.query(
+        `INSERT INTO bot_settings(key,value) VALUES('diamond_loan_enabled',$1)
+         ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
+        [enabled ? "true" : "false"]
+      ),
+      2500
+    );
+    return true;
+  } catch (e) {
+    console.error("Diamond status save error:", e.message);
+    return false;
+  }
 }
 
 function diamondUnavailableText() {
@@ -2895,7 +2923,7 @@ async function manualText(
 
   if (d.type === "AIR" && s.state === "MAN_AIR_LOAN_PROFIT") {
     if (v < 5000000 || v > 6000000) {
-      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد.");
+      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد.");
       return true;
     }
     await finishAirCalc(chatId, d, "loan", v);
@@ -3021,7 +3049,7 @@ async function manualText(
         await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", nextData);
         await sendMessage(
           chatId,
-          "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
+          "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد:"
         );
       } else {
         await saveSession(chatId, "MAN_BUS_PROFIT", nextData);
@@ -3092,7 +3120,7 @@ async function manualText(
   /* محاسبه اتوبوسی: سود طرح الماس */
   if (d.type === "BUS" && s.state === "MAN_BUS_LOAN_PROFIT") {
     if (v < 5000000 || v > 6000000) {
-      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد.");
+      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد.");
       return true;
     }
 
@@ -3958,8 +3986,7 @@ async function handleCallback(
     cb.id
   );
 
-  // مدیریت وام الماس: این بخش عمداً در ابتدای callbackها قرار گرفته تا
-  // هیچ مسیر دیگری جلوی دکمه‌های فعال/غیرفعال را نگیرد.
+  // مدیریت وضعیت وام الماس — فقط مدیر
   if (data === "ADMIN_DIAMOND_STATUS" || data === "ADMIN_DIAMOND_ENABLE" || data === "ADMIN_DIAMOND_DISABLE") {
     if (!isAdmin(chatId)) return;
 
@@ -3967,7 +3994,7 @@ async function handleCallback(
       const enabled = await getDiamondEnabled();
       await sendMessage(
         chatId,
-        `💎 مدیریت وضعیت وام الماس\n\nوضعیت فعلی: ${enabled ? "🟢 فعال" : "🔴 غیرفعال"}\n\n🔒 این بخش فقط برای مدیر نمایش داده می‌شود.\n\nدر صورت غیرفعال بودن، درخواست‌های جدید وام متوقف می‌شوند و مشتری به خدمات سفر نقدی هدایت می‌شود.`,
+        `💎 مدیریت وضعیت وام الماس\n\nوضعیت فعلی: ${enabled ? "🟢 فعال" : "🔴 غیرفعال"}\n\n🔒 این بخش فقط برای مدیر نمایش داده می‌شود.\n\nبا فعال بودن، مشتری می‌تواند درخواست جدید طرح الماس ثبت کند؛ با غیرفعال بودن، درخواست جدید وام متوقف و مشتری به سفر نقدی هدایت می‌شود.`,
         { inline_keyboard: [
           [{ text: "🟢 فعال‌سازی وام الماس", callback_data: "ADMIN_DIAMOND_ENABLE" }],
           [{ text: "🔴 توقف موقت وام الماس", callback_data: "ADMIN_DIAMOND_DISABLE" }],
@@ -3979,13 +4006,25 @@ async function handleCallback(
     }
 
     if (data === "ADMIN_DIAMOND_ENABLE") {
-      await setDiamondEnabled(true);
-      await sendMessage(chatId, "🟢 طرح الماس با موفقیت فعال شد.\n\nاز این لحظه مشتریان می‌توانند درخواست جدید طرح الماس ثبت کنند.", { inline_keyboard: [[{text:"💎 مدیریت وام الماس",callback_data:"ADMIN_DIAMOND_STATUS"}],[{text:"🔙 محاسبات مدیر",callback_data:"ADMIN_CALC_EXIT"}]] });
+      const saved = await setDiamondEnabled(true);
+      await sendMessage(
+        chatId,
+        saved
+          ? "🟢 طرح الماس با موفقیت فعال شد.\n\nاز این لحظه مشتریان می‌توانند درخواست جدید طرح الماس ثبت کنند."
+          : "🟢 طرح الماس فعال شد، اما ذخیره دائمی در پایگاه‌داده انجام نشد. لطفاً وضعیت دیتابیس را بررسی کنید.",
+        { inline_keyboard: [[{text:"💎 مدیریت وام الماس",callback_data:"ADMIN_DIAMOND_STATUS"}],[{text:"🔙 محاسبات مدیر",callback_data:"ADMIN_CALC_EXIT"}]] }
+      );
       return;
     }
 
-    await setDiamondEnabled(false);
-    await sendMessage(chatId, "🔴 طرح الماس موقتاً غیرفعال شد.\n\nدرخواست‌های جدید وام ثبت نمی‌شوند و مشتریان به خدمات سفر نقدی هدایت خواهند شد.\n\nدرخواست‌های قبلی و اطلاعات آن‌ها حفظ می‌شوند.", { inline_keyboard: [[{text:"💎 مدیریت وام الماس",callback_data:"ADMIN_DIAMOND_STATUS"}],[{text:"🔙 محاسبات مدیر",callback_data:"ADMIN_CALC_EXIT"}]] });
+    const saved = await setDiamondEnabled(false);
+    await sendMessage(
+      chatId,
+      saved
+        ? "🔴 طرح الماس موقتاً غیرفعال شد.\n\nدرخواست‌های جدید وام ثبت نمی‌شوند و مشتریان به خدمات سفر نقدی هدایت خواهند شد.\n\nدرخواست‌های قبلی و اطلاعات آن‌ها حفظ می‌شوند."
+        : "🔴 طرح الماس غیرفعال شد، اما ذخیره دائمی در پایگاه‌داده انجام نشد. لطفاً وضعیت دیتابیس را بررسی کنید.",
+      { inline_keyboard: [[{text:"💎 مدیریت وام الماس",callback_data:"ADMIN_DIAMOND_STATUS"}],[{text:"🔙 محاسبات مدیر",callback_data:"ADMIN_CALC_EXIT"}]] }
+    );
     return;
   }
 
@@ -4363,57 +4402,6 @@ async function handleCallback(
       code
     );
 
-    return;
-  }
-
-  /*
-   * =======================================================
-   * مدیریت وضعیت وام الماس
-   * =======================================================
-   */
-
-  if (data === "ADMIN_DIAMOND_STATUS" && isAdmin(chatId)) {
-    const enabled = await getDiamondEnabled();
-    await sendMessage(
-      chatId,
-      `💎 مدیریت وضعیت وام الماس\n\nوضعیت فعلی: ${enabled ? "🟢 فعال" : "🔴 غیرفعال"}\n\n🔒 این بخش فقط برای مدیر نمایش داده می‌شود.\n\nوقتی وام غیرفعال باشد، مشتریان درخواست جدید وام ثبت نمی‌کنند و به خدمات سفر نقدی هدایت می‌شوند.`,
-      {
-        inline_keyboard: [
-          [
-            { text: "🟢 فعال‌سازی وام الماس", callback_data: "ADMIN_DIAMOND_ENABLE" }
-          ],
-          [
-            { text: "🔴 توقف موقت وام الماس", callback_data: "ADMIN_DIAMOND_DISABLE" }
-          ],
-          [
-            { text: "🔄 بروزرسانی وضعیت", callback_data: "ADMIN_DIAMOND_STATUS" }
-          ],
-          [
-            { text: "🔙 بازگشت به محاسبات", callback_data: "ADMIN_CALC_EXIT" }
-          ]
-        ]
-      }
-    );
-    return;
-  }
-
-  if (data === "ADMIN_DIAMOND_ENABLE" && isAdmin(chatId)) {
-    await setDiamondEnabled(true);
-    await sendMessage(
-      chatId,
-      "🟢 طرح الماس با موفقیت فعال شد.\n\nاز این لحظه مشتریان می‌توانند درخواست جدید طرح الماس ثبت کنند.",
-      { inline_keyboard: [[{ text: "💎 مدیریت وام الماس", callback_data: "ADMIN_DIAMOND_STATUS" }], [{ text: "🔙 محاسبات مدیر", callback_data: "ADMIN_CALC_EXIT" }]] }
-    );
-    return;
-  }
-
-  if (data === "ADMIN_DIAMOND_DISABLE" && isAdmin(chatId)) {
-    await setDiamondEnabled(false);
-    await sendMessage(
-      chatId,
-      "🔴 طرح الماس موقتاً غیرفعال شد.\n\nدرخواست‌های جدید وام ثبت نمی‌شوند و مشتریان به خدمات سفر نقدی هدایت خواهند شد.\n\nدرخواست‌های قبلی و اطلاعات آن‌ها حفظ می‌شوند.",
-      { inline_keyboard: [[{ text: "💎 مدیریت وام الماس", callback_data: "ADMIN_DIAMOND_STATUS" }], [{ text: "🔙 محاسبات مدیر", callback_data: "ADMIN_CALC_EXIT" }]] }
-    );
     return;
   }
 
@@ -4923,6 +4911,12 @@ async function handleCallback(
             "بدون اجاره"
         });
 
+      // در طرح الماس ریلی، قبل از ذخیره/نمایش نتیجه، درصد تأمین را از مدیر می‌گیریم.
+      if (data === "RAIL_PAYMENT_LOAN") {
+        await showDiamondRatioSelection(chatId, d, result);
+        return;
+      }
+
       /*
        * ذخیره محاسبه داخل درخواست
        */
@@ -5048,7 +5042,7 @@ ${e.message}`
       await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", d);
       await sendMessage(
         chatId,
-        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
+        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد:"
       );
     }
 

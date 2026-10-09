@@ -215,6 +215,9 @@ function todayJalali() {
  * =========================================================
  */
 
+
+let diamondEnabledCache = false;
+
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bot_settings(
@@ -264,7 +267,32 @@ async function initDB() {
   `);
 
 
-let diamondEnabledCache = false;
+  const cols = [
+    "applicant_name",
+    "phone",
+    "bale_id",
+    "payment_type",
+    "payload",
+    "status",
+    "updated_at",
+    "username",
+    "request_type"
+  ];
+
+  for (const c of cols) {
+    const type =
+      c === "payload"
+        ? "JSONB DEFAULT '{}'::jsonb"
+        : c === "status"
+        ? "TEXT DEFAULT 'pending'"
+        : "TEXT";
+
+    await pool.query(
+      `ALTER TABLE requests ADD COLUMN IF NOT EXISTS ${c} ${type}`
+    );
+  }
+}
+
 
 async function loadDiamondEnabledAtStartup() {
   try {
@@ -347,32 +375,6 @@ function diamondUnavailableKeyboard() {
       [{ text: "🔙 بازگشت", callback_data: "DIAMOND_BACK" }]
     ]
   };
-}
-
-  const cols = [
-    "applicant_name",
-    "phone",
-    "bale_id",
-    "payment_type",
-    "payload",
-    "status",
-    "updated_at",
-    "username",
-    "request_type"
-  ];
-
-  for (const c of cols) {
-    const type =
-      c === "payload"
-        ? "JSONB DEFAULT '{}'::jsonb"
-        : c === "status"
-        ? "TEXT DEFAULT 'pending'"
-        : "TEXT";
-
-    await pool.query(
-      `ALTER TABLE requests ADD COLUMN IF NOT EXISTS ${c} ${type}`
-    );
-  }
 }
 
 async function getSession(id) {
@@ -2714,18 +2716,24 @@ async function railText(
 
 async function showDiamondRatioSelection(chatId, data, result) {
   const requestCode = data.requestCode || "";
+  const isRail = Boolean(result?.routeInfo || data?.type === "RAIL" || data?.type === "rail");
+  const normalizedData = { ...data, type: isRail ? "RAIL" : (data.type || result?.type || "BUS") };
+  const normalizedResult = { ...result, paymentType: "loan" };
+
+  // ابتدا وضعیت محاسبه را ذخیره می‌کنیم تا کلیک روی نسبت‌ها دقیقاً به همین محاسبه وصل بماند.
   await saveSession(chatId, "DIAMOND_RATIO_SELECT", {
-    ...data,
-    pendingDiamondCalculation: result
+    ...normalizedData,
+    pendingDiamondCalculation: normalizedResult
   });
 
   await sendMessage(
     chatId,
     `💎 انتخاب سهم طرح الماس
 
-💰 مبلغ کل سفر: ${money(result.finalPrice)} تومان
+💰 مبلغ کل سفر: ${money(normalizedResult.finalPrice)} تومان
 
-لطفاً درصد تأمین طرح را انتخاب کنید.
+لطفاً یکی از نسبت‌های زیر را انتخاب کنید:
+۸۰٪ وام / ۲۰٪ نقد، ۷۰٪ وام / ۳۰٪ نقد، ۶۰٪ وام / ۴۰٪ نقد یا ۵۰٪ وام / ۵۰٪ نقد.
 مبلغ وام به پله‌های ۵ میلیون تومانی رو به بالا رُند می‌شود و مبلغ نقدی از مبلغ کل محاسبه می‌شود.`,
     diamondRatioKeyboard(requestCode)
   );
@@ -2742,8 +2750,11 @@ async function finalizeDiamondCalculation(chatId, loanPercent, requestCodeFromCa
   }
 
   const split = PRICING.applyDiamondSplit(base.finalPrice, Number(loanPercent));
+  const isRail = Boolean(base?.routeInfo || d?.type === "RAIL" || d?.type === "rail");
   const result = {
     ...base,
+    type: isRail ? "RAIL" : (base.type || d.type || "BUS"),
+    paymentType: "loan",
     finalPrice: split.total,
     loanPercent: split.loanPercent,
     cashPercent: split.cashPercent,
@@ -3146,7 +3157,8 @@ async function manualText(
 
   /* محاسبه اتوبوسی: سود طرح الماس */
   if (d.type === "BUS" && s.state === "MAN_BUS_LOAN_PROFIT") {
-    if (v < 2000000 || v > 2500000) {
+    // سود اتوبوسی طرح الماس فقط در بازه ۲ تا ۲٫۵ میلیون تومان مجاز است.
+    if (!Number.isFinite(v) || v < 2000000 || v > 2500000) {
       await sendMessage(chatId, "❌ سود طرح الماس تور اتوبوسی باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد.");
       return true;
     }
@@ -4943,7 +4955,7 @@ async function handleCallback(
 
       // در طرح الماس ریلی، قبل از ذخیره/نمایش نتیجه، درصد تأمین را از مدیر می‌گیریم.
       if (data === "RAIL_PAYMENT_LOAN") {
-        await showDiamondRatioSelection(chatId, d, result);
+        await showDiamondRatioSelection(chatId, { ...d, type: "RAIL" }, { ...result, paymentType: "loan" });
         return;
       }
 

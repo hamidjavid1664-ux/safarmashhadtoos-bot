@@ -43,10 +43,17 @@ const NEED_PASSENGER_LIST = [
  */
 
 function isAdmin(chatId, userId = null) {
-  const adminId = String(process.env.ADMIN_CHAT_ID || CONFIG.ADMIN_CHAT_ID || "").trim();
-  const c = String(chatId || "").trim();
-  const u = String(userId || "").trim();
-  return Boolean(adminId) && (c === adminId || u === adminId);
+  // در برخی استقرارها شناسه مدیر در متغیر محیطی Render است، نه config.js.
+  // هم شناسه چتِ مدیر و هم شناسه شخصیِ کلیک‌کننده بررسی می‌شود.
+  const adminIds = [
+    CONFIG.ADMIN_CHAT_ID,
+    process.env.ADMIN_CHAT_ID,
+    process.env.ADMIN_USER_ID,
+    process.env.ADMIN_ID
+  ].map(v => String(v ?? "").trim()).filter(Boolean);
+  const c = String(chatId ?? "").trim();
+  const u = String(userId ?? "").trim();
+  return adminIds.length > 0 && adminIds.some(id => id === c || id === u);
 }
 
 function en(v) {
@@ -2924,7 +2931,7 @@ async function manualText(
     if (d.requestCode) {
       if (d.paymentType === "loan") {
         await saveSession(chatId, "MAN_AIR_LOAN_PROFIT", nextData);
-        await sendMessage(chatId, "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد:");
+        await sendMessage(chatId, "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:");
       } else {
         await finishAirCalc(chatId, nextData, "cash", 3500000);
       }
@@ -2942,8 +2949,8 @@ async function manualText(
   }
 
   if (d.type === "AIR" && s.state === "MAN_AIR_LOAN_PROFIT") {
-    if (v < 2000000 || v > 2500000) {
-      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد.");
+    if (v < 5000000 || v > 6000000) {
+      await sendMessage(chatId, "❌ سود طرح الماس تور هوایی باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد.");
       return true;
     }
     await finishAirCalc(chatId, d, "loan", v);
@@ -3140,7 +3147,7 @@ async function manualText(
   /* محاسبه اتوبوسی: سود طرح الماس */
   if (d.type === "BUS" && s.state === "MAN_BUS_LOAN_PROFIT") {
     if (v < 2000000 || v > 2500000) {
-      await sendMessage(chatId, "❌ سود طرح الماس باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد.");
+      await sendMessage(chatId, "❌ سود طرح الماس تور اتوبوسی باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد.");
       return true;
     }
 
@@ -5107,7 +5114,7 @@ ${e.message}`
 
       await sendMessage(
         chatId,
-        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۲٬۰۰۰٬۰۰۰ تا ۲٬۵۰۰٬۰۰۰ تومان باشد:"
+        "💎 سود هر نفر برای طرح الماس را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
       );
     }
 

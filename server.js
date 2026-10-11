@@ -84,7 +84,7 @@ function money(v) {
   return Number(v || 0).toLocaleString("fa-IR");
 }
 
-const DIAMOND_LOAN_OPTIONS = [80, 70, 60, 50];
+const DIAMOND_LOAN_OPTIONS = [80, 70, 60, 50, 30];
 
 function diamondRatioKeyboard(requestCode = "") {
   return {
@@ -96,6 +96,9 @@ function diamondRatioKeyboard(requestCode = "") {
       [
         { text: "💎 وام ۶۰٪ / نقد ۴۰٪", callback_data: `DIAMOND_RATIO:60${requestCode ? `:${requestCode}` : ""}` },
         { text: "💎 وام ۵۰٪ / نقد ۵۰٪", callback_data: `DIAMOND_RATIO:50${requestCode ? `:${requestCode}` : ""}` }
+      ],
+      [
+        { text: "💎 وام ۳۰٪ / نقد ۷۰٪ (شرایط جدید)", callback_data: `DIAMOND_RATIO:30${requestCode ? `:${requestCode}` : ""}` }
       ]
     ]
   };
@@ -662,25 +665,29 @@ function backKeyboard() {
  */
 
 function diamondPlanText() {
-  return `💎 طرح الماس شهر بهشت
+  return `💎 طرح الماس شهر بهشت؛ زیارت، با برنامه‌ریزی هوشمندانه
 
-۱️⃣ نصب کیوبانک مهر
-۲️⃣ تکمیل احراز هویت
-۳️⃣ انجام اعتبارسنجی
-۴️⃣ دریافت رتبه اعتباری
+🌹 دلتنگ زیارت امام رضا (ع) هستید، اما افزایش هزینه‌های سفر و شرایط اقتصادی باعث شده برای سفر تصمیم‌گیری سخت‌تر شود؟
 
-🟢 رتبه A و B: بدون ضامن؛ خودت ضامن حسابت هستی.
+ما در «شهر بهشت» تلاش می‌کنیم مسیر سفر به مشهد مقدس را برای شما آسان‌تر کنیم.
 
-🟡 رتبه C و D و پایین‌تر: یک ضامن + نامه کسر از حقوق + فیش حقوقی
+✨ با شرایط جدید طرح الماس، هنوز هم می‌توانید برای زیارت برنامه‌ریزی کنید!
 
-⏳ بازپرداخت: ۱۲ ماهه
-💰 سود: ۳ درصد
-🚫 بدون مراجعه به شعبه
-📄 اصل مدارک باید بارگذاری شود.
+💠 شرایط طرح الماس جدید:
+🔹 ۷۰٪ هزینه سفر با شما
+🔹 ۳۰٪ هزینه سفر در قالب وام طرح الماس
+🔹 بازپرداخت وام در ۱۸ ماه
+🔹 سود سالانه ۳٪
 
-💳 پس از تأیید، مسافر باید سهم نقدی تعیین‌شده توسط مدیر را پرداخت کند و رسید را ارسال نماید.
+📌 نحوه پرداخت:
+شما ۷۰ درصد هزینه سفر را پرداخت می‌کنید و ۳۰ درصد باقی‌مانده در قالب وام طرح الماس تأمین می‌شود.
 
-📌 سهم نقدی می‌تواند بر اساس طرح انتخابی مدیر متفاوت باشد (۸۰٪ وام / ۲۰٪ نقد، ۷۰٪ / ۳۰٪، ۶۰٪ / ۴۰٪ یا ۵۰٪ / ۵۰٪).
+🌷 با طرح الماس شهر بهشت، زیارت امام رضا (ع) را آسان‌تر برنامه‌ریزی کنید.
+
+📲 برای مشاهده تورها و محاسبه هزینه سفر، از منوی همین ربات اقدام کنید.
+
+شهر بهشت
+💚 سفر هوشمندانه به مشهد مقدس
 
 ☎️ پشتیبانی: ${CONFIG.CONTACT.phone}`;
 }
@@ -824,6 +831,7 @@ function calculatedPaymentText(req) {
 💎 سهم طرح: ${loanPercent}٪
 💳 مبلغ نقدی موردنیاز (${cashPercent}٪): ${money(customerCash)} تومان
 💎 مبلغ تأمین‌شده از طرح (${loanPercent}٪): ${money(loanAmount)} تومان
+${loanPercent === 30 ? "⏳ بازپرداخت: ۱۸ ماه\n💰 سود سالانه: ۳٪\n" : ""}
 
 ⚠️ این پیام فقط جهت اعلام مبلغ است.
 ⚠️ تا تأیید نهایی مدیر، هیچ پرداختی انجام ندهید.
@@ -1699,6 +1707,11 @@ async function approveRequest(
 
   const req = r.rows[0];
 
+  if (String(req.status || "").toLowerCase() === "approved") {
+    await sendMessage(adminId, `ℹ️ درخواست ${code} قبلاً تأیید شده است؛ پیام پرداخت دوباره ارسال نشد.`);
+    return;
+  }
+
   const payload =
     req.payload || {};
 
@@ -1719,7 +1732,7 @@ async function approveRequest(
     await sendMessage(req.user_id, diamondPaymentText(req));
   } else {
     const total = Number(payload.calculation?.finalPrice ?? payload.totalCost ?? 0);
-    await sendMessage(req.user_id, `✅ درخواست شما تأیید شد.\n\n🆔 شماره درخواست: ${code}\n💰 هزینه کل سفر: ${money(total)} تومان\n💵 مبلغ قابل پرداخت: ${money(total)} تومان\n\n${paymentInfoText()}\n\n⚠️ پس از پرداخت، تصویر یا فایل رسید واریزی را همین‌جا ارسال کنید.\nبعد از تأیید رسید، در صورت نیاز لیست مسافران یا همراهان از شما دریافت می‌شود.`);
+    await sendMessage(req.user_id, `✅ درخواست شما تأیید شد.\n\n🆔 شماره درخواست: ${code}\n💰 هزینه کل سفر: ${money(total)} تومان\n💵 مبلغ قابل پرداخت: ${money(total)} تومان\n\n${paymentInfoText()}\n\nبعد از تأیید رسید، در صورت نیاز لیست مسافران یا همراهان از شما دریافت می‌شود.`);
   }
 
   await saveSession(
@@ -3880,9 +3893,9 @@ ${statusText}
       await saveSession(chatId, "PASSENGER_LIST", session.data || {});
       await sendMessage(
         chatId,
-        `📋 لطفاً اطلاعات همه مسافران را در چند خط ارسال کنید.\n\nفرمت هر خط:
-نام و نام خانوادگی | کد ملی | تاریخ تولد\n\nمثال:
-علی رضایی | ۱۲۳۴۵۶۷۸۹۰ | ۱۳۶۲/۰۶/۱۷\nمحمد احمدی | ۰۹۸۷۶۵۴۳۲۱ | ۱۳۷۰/۰۲/۱۰`,
+        `📋 لطفاً اطلاعات تمام مسافران را به ترتیب زیر ارسال کنید.\n\nفرمت هر خط:
+نام و نام خانوادگی | کد ملی | تاریخ تولد\n\nنمونه:
+علی محمدی | ۱۲۳۴۵۶۷۸۹۰ | 1362/06/17\nمحمد احمدی | ۰۹۸۷۶۵۴۳۲۱ | 1370/02/10\n\n🔹 تاریخ تولد را به شکل سال/ماه/روز وارد کنید.\n🔹 اعداد فارسی و انگلیسی هر دو مجاز هستند.\n🔹 بین نام، کد ملی و تاریخ تولد از علامت | استفاده کنید.`,
         passengerMethodKeyboard()
       );
       return;
@@ -4182,7 +4195,7 @@ async function handleCallback(
     const parts = data.split(":");
     const percent = Number(parts[1]);
     const code = parts.slice(2).join(":") || "";
-    if (![50,60,70,80].includes(percent)) return;
+    if (![30,50,60,70,80].includes(percent)) return;
     await finalizeDiamondCalculation(chatId, percent, code);
     return;
   }

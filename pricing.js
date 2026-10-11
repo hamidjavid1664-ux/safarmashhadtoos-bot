@@ -101,7 +101,7 @@ function roundDiamondTotal(amount) {
 
 function applyDiamondSplit(totalAmount, loanPercent = 60) {
   const total = roundDiamondTotal(totalAmount);
-  const allowed = [50, 60, 70, 80];
+  const allowed = [30, 50, 60, 70, 80];
   const percent = allowed.includes(Number(loanPercent)) ? Number(loanPercent) : 60;
   let loanAmount = roundLoanAmount(total * percent / 100);
 

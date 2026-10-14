@@ -191,6 +191,24 @@ function todayJalali() {
 
   return `${year}/${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}`;
 }
+
+
+function validateTravelDate(value) {
+  const normalized = normalizeDate(value);
+  if (!normalized) return { ok: false, reason: "format" };
+  const today = todayJalali();
+  const year = Number(normalized.split("/")[0]);
+  const currentYear = Number(today.split("/")[0]);
+  if (year !== currentYear) return { ok: false, reason: "year", normalized };
+  if (jalaliToDay(normalized) < jalaliToDay(today)) return { ok: false, reason: "past", normalized };
+  return { ok: true, normalized };
+}
+
+function validTravelDatePair(departureDate, returnDate) {
+  const a = validateTravelDate(departureDate);
+  const b = validateTravelDate(returnDate);
+  return a.ok && b.ok && jalaliToDay(b.normalized) > jalaliToDay(a.normalized);
+}
 /*
  * =========================================================
  * دیتابیس
@@ -540,7 +558,7 @@ function narvanPlanText() {
 📅 مدت بازپرداخت: ۱۸ ماه
 📊 سود: ۴٪ از کل مبلغ وام برای کل دوره بازپرداخت
 
-📌 مبلغ وام بر اساس هزینه کل تور خانواده تعیین می‌شود. طرح تقسیم ۷۰٪/۳۰٪ فعلاً اجرا نمی‌شود. شرایط نهایی و مراحل دریافت وام پیش از ثبت درخواست به اطلاع متقاضی خواهد رسید.
+📌 مبلغ وام بر اساس هزینه کل تور خانواده تعیین می‌شود. شرایط نهایی و مراحل دریافت وام پیش از ثبت درخواست به اطلاع متقاضی خواهد رسید.
 
 📲 برای مشاهده تورها و محاسبه هزینه سفر، از گزینه زیر استفاده کنید.
 ☎️ پشتیبانی: ${CONFIG.CONTACT.phone}
@@ -1171,47 +1189,39 @@ async function handleTourText(
   const d = s.data || {};
 
   if (s.state === "TOUR_DATE_IN") {
-    const x =
-      normalizeDate(text);
-
-    if (!x) {
-      await sendMessage(
-        chatId,
-        "❌ تاریخ صحیح نیست. مثال: ۱۴۰۵/۰۷/۱۳"
-      );
+    const checked = validateTravelDate(text);
+    if (!checked.ok) {
+      const msg = checked.reason === "past"
+        ? "❌ تاریخ ورود نمی‌تواند قبل از امروز باشد. تاریخ امروز یا روزهای آینده را وارد کنید."
+        : checked.reason === "year"
+          ? `❌ فقط تاریخ‌های سال جاری شمسی (${todayJalali().split("/")[0]}) پذیرفته می‌شود.`
+          : "❌ تاریخ صحیح نیست. مثال: ۱۴۰۵/۰۷/۱۳";
+      await sendMessage(chatId, msg);
       return true;
     }
 
-    await askTourOut(
-      chatId,
-      {
-        ...d,
-        departureDate: x
-      }
-    );
+    await askTourOut(chatId, { ...d, departureDate: checked.normalized });
 
     return true;
   }
 
   if (s.state === "TOUR_DATE_OUT") {
-    const x =
-      normalizeDate(text);
-
-    if (!x) {
-      await sendMessage(
-        chatId,
-        "❌ تاریخ صحیح نیست. مثال: ۱۴۰۵/۰۷/۱۶"
-      );
+    const checked = validateTravelDate(text);
+    if (!checked.ok) {
+      const msg = checked.reason === "past"
+        ? "❌ تاریخ خروج نمی‌تواند قبل از امروز باشد. تاریخ امروز یا روزهای آینده را وارد کنید."
+        : checked.reason === "year"
+          ? `❌ فقط تاریخ‌های سال جاری شمسی (${todayJalali().split("/")[0]}) پذیرفته می‌شود.`
+          : "❌ تاریخ صحیح نیست. مثال: ۱۴۰۵/۰۷/۱۶";
+      await sendMessage(chatId, msg);
+      return true;
+    }
+    if (d.departureDate && jalaliToDay(checked.normalized) <= jalaliToDay(d.departureDate)) {
+      await sendMessage(chatId, "❌ تاریخ خروج باید بعد از تاریخ ورود باشد. دوباره تاریخ خروج را وارد کنید.");
       return true;
     }
 
-    await askNights(
-      chatId,
-      {
-        ...d,
-        returnDate: x
-      }
-    );
+    await askNights(chatId, { ...d, returnDate: checked.normalized });
 
     return true;
   }
@@ -1405,6 +1415,11 @@ async function submitRequest(chatId) {
   if (!s) return;
 
   const d = s.data || {};
+
+  if (!d.departureDate || !d.returnDate || !validTravelDatePair(d.departureDate, d.returnDate)) {
+    await sendMessage(chatId, `❌ تاریخ ورود و خروج معتبر نیست یا تاریخ گذشته وارد شده است. لطفاً درخواست را از ابتدا ثبت کنید. فقط تاریخ‌های سال جاری شمسی (${todayJalali().split("/")[0]}) و تاریخ امروز یا آینده پذیرفته می‌شود.`);
+    return;
+  }
 
   const code =
     requestCode();

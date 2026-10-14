@@ -143,7 +143,14 @@ function normalizeDate(v) {
 }
 
 function jalaliToDay(v) {
+  if (typeof v !== "string" || !/^\d{1,4}\/\d{1,2}\/\d{1,2}$/.test(v)) {
+    throw new TypeError("تاریخ شمسی نامعتبر است؛ انتظار yyyy/mm/dd می‌رفت.");
+  }
   const [jy, jm, jd] = v.split("/").map(Number);
+  if (!Number.isInteger(jy) || !Number.isInteger(jm) || !Number.isInteger(jd) ||
+      jm < 1 || jm > 12 || jd < 1 || jd > 31) {
+    throw new TypeError("تاریخ شمسی خارج از محدوده است.");
+  }
 
   let days =
     -355668 +
@@ -166,28 +173,24 @@ function jalaliToDay(v) {
 }
 
 function todayJalali() {
-  const d = new Date();
+  // تاریخ روز بر اساس ساعت ایران و تقویم شمسی؛ خروجی همیشه yyyy/mm/dd است.
+  const parts = new Intl.DateTimeFormat("en-u-ca-persian-nu-latn", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "Asia/Tehran"
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  const year = Number(values.year);
+  const month = Number(values.month);
+  const day = Number(values.day);
 
-  const gy = d.getUTCFullYear();
-  const gm = d.getUTCMonth() + 1;
-  const gd = d.getUTCDate();
-
-  let gDay =
-    Date.UTC(gy, gm - 1, gd) / 86400000;
-
-  let jy = gy - 621;
-
-  while (
-    jalaliToDay(`${jy + 1}/01/01`) -
-      jalaliToDay("1/01/01") <=
-    gDay - Date.UTC(1, 0, 1) / 86400000
-  ) {
-    jy++;
+  if (!year || !month || !day || month < 1 || month > 12 || day < 1 || day > 31) {
+    throw new Error("تبدیل تاریخ امروز به شمسی ناموفق بود.");
   }
 
-  return null;
+  return `${year}/${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}`;
 }
-
 /*
  * =========================================================
  * دیتابیس
@@ -526,15 +529,18 @@ function backKeyboard() {
 function narvanPlanText() {
   return `🌳 طرح نارون شهر بهشت
 
-🌹 برای آسان‌تر شدن برنامه‌ریزی سفر زیارتی به مشهد مقدس، طرح نارون با شرایط جدید ارائه می‌شود.
+🌹 طرح نارون برای کمک به خانواده‌هایی در نظر گرفته شده است که قصد سفر زیارتی به مشهد مقدس دارند.
 
-💠 شرایط طرح نارون:
-🔹 ۷۰٪ هزینه سفر بر عهده مشتری
-🔹 ۳۰٪ هزینه سفر با تأمین شهر بهشت
-🔹 بازپرداخت بخش تأمین‌شده در ۱۸ ماه
-🔹 سود سالانه ۳٪
+💠 شرایط دریافت وام طرح نارون:
+🔹 هزینه کل تور تا ۵۰ میلیون تومان: ۲۰ میلیون تومان وام
+🔹 هزینه کل تور بیشتر از ۵۰ تا ۸۰ میلیون تومان: ۲۵ میلیون تومان وام
+🔹 هزینه کل تور بیشتر از ۸۰ تا ۱۰۰ میلیون تومان: ۳۰ میلیون تومان وام
+🔹 هزینه کل تور بیشتر از ۱۰۰ میلیون تومان: مشمول شرایط فعلی طرح نیست
 
-📌 مبلغ نهایی و سهم پرداختی مشتری بر اساس نوع تور و جزئیات سفر محاسبه می‌شود. شرایط نهایی تأمین و بازپرداخت پیش از ثبت نهایی درخواست اعلام خواهد شد.
+📅 مدت بازپرداخت: ۱۸ ماه
+📊 سود: ۴٪ از کل مبلغ وام برای کل دوره بازپرداخت
+
+📌 مبلغ وام بر اساس هزینه کل تور خانواده تعیین می‌شود. طرح تقسیم ۷۰٪/۳۰٪ فعلاً اجرا نمی‌شود. شرایط نهایی و مراحل دریافت وام پیش از ثبت درخواست به اطلاع متقاضی خواهد رسید.
 
 📲 برای مشاهده تورها و محاسبه هزینه سفر، از گزینه زیر استفاده کنید.
 ☎️ پشتیبانی: ${CONFIG.CONTACT.phone}
@@ -2129,7 +2135,7 @@ async function startFeedback(req) {
 
   await sendMessage(
     chatId,
-    `🌹 ${req.applicant_name || "همراه گرامی"}\n\nسفر شما به مشهد به پایان رسیده است.\nخوشحال می‌شویم چند دقیقه وقت بگذارید و تجربه سفرتان را با ما در میان بگذارید. 🙏\n\nاین نظرها به ما کمک می‌کند خدمات و هتل‌های بهتر و باکیفیت‌تری به زائران ارائه کنیم.\n\n${FEEDBACK_ITEMS[0]}\n\nاز ۱ تا ۵ امتیاز بدهید:`,
+    `🌹 ${req.applicant_name || "همراه گرامی"}\n\nسفر شما به مشهد به پایان رسیده است.\nخوشحال می‌شویم چند دقیقه وقت بگذارید و تجربه سفرتان را با ما در میان بگذارید. 🙏\n\nاین نظرها به ما کمک می‌کند خدمات و هتل‌های بهتر و باکیفیت‌تری به زائران ارائه کنیم.\n\n${feedbackItems[0]}\n\nاز ۱ تا ۵ امتیاز بدهید:`,
     feedbackRatingKeyboard(0, code)
   );
 }

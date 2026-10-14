@@ -15,8 +15,7 @@ const SETTINGS = {
   AIR_CASH_PROFIT: 3500000,
   AIR_LOAN_PROFIT: 6000000,
   LOAN_ROUND_STEP: 5000000,
-  CASH_ROUND_STEP: 100000,
-  DIAMOND_TOTAL_ROUND_STEP: 500000
+  NARVAN_ROUND_STEP: 500000
 };
 
 const RAIL_TRAINS = {
@@ -82,43 +81,13 @@ function formatNumber(value) {
 
 function roundLoanAmount(amount) {
   const step = SETTINGS.LOAN_ROUND_STEP;
-  return Math.ceil(toNumber(amount) / step) * step;
+  return Math.round(toNumber(amount) / step) * step;
 }
 
-function roundUpAmount(amount, step) {
-  const n = toNumber(amount);
-  const s = Math.max(1, toNumber(step));
-  return Math.ceil(n / s) * s;
-}
-
-function roundCashAmount(amount) {
-  return roundUpAmount(amount, SETTINGS.CASH_ROUND_STEP);
-}
-
-function roundDiamondTotal(amount) {
-  return roundUpAmount(amount, SETTINGS.DIAMOND_TOTAL_ROUND_STEP);
-}
-
-function applyDiamondSplit(totalAmount, loanPercent = 60) {
-  const total = roundDiamondTotal(totalAmount);
-  const allowed = [30, 50, 60, 70, 80];
-  const percent = allowed.includes(Number(loanPercent)) ? Number(loanPercent) : 60;
-  let loanAmount = roundLoanAmount(total * percent / 100);
-
-  if (loanAmount >= total) {
-    loanAmount = Math.max(0, Math.floor((total - 1) / SETTINGS.LOAN_ROUND_STEP) * SETTINGS.LOAN_ROUND_STEP);
-  }
-
-  const customerCash = total - loanAmount;
-  return {
-    total,
-    loanPercent: percent,
-    cashPercent: 100 - percent,
-    loanAmount,
-    customerCash,
-    cashPercentActual: total ? (customerCash / total) * 100 : 0,
-    loanPercentActual: total ? (loanAmount / total) * 100 : 0
-  };
+// محاسبه مستقل طرح نارون: گرد کردن با گام کوچک‌تر تا نسبت ۷۰/۳۰ حفظ شود.
+function roundNarvanAmount(amount) {
+  const step = SETTINGS.NARVAN_ROUND_STEP;
+  return Math.round(toNumber(amount) / step) * step;
 }
 
 function getTrainsForRoute(route) {
@@ -226,20 +195,20 @@ function calculateRailTour(data) {
       : SETTINGS.RAIL_CASH_PROFIT;
 
   const totalProfit = profitPerPerson * totalPassengers;
-  const rawFinalPrice = netPurchaseTotal + totalProfit;
-  const finalPrice = paymentType === "loan"
-    ? roundDiamondTotal(rawFinalPrice)
-    : roundCashAmount(rawFinalPrice);
+  const finalPrice = netPurchaseTotal + totalProfit;
 
   let customerCash = 0;
   let loanAmount = 0;
-  let loanPercent = null;
 
   if (paymentType === "loan") {
-    const split = applyDiamondSplit(finalPrice, data.loanPercent ?? 60);
-    customerCash = split.customerCash;
-    loanAmount = split.loanAmount;
-    loanPercent = split.loanPercent;
+    loanAmount = roundNarvanAmount(finalPrice * 0.30);
+
+    // وام از قیمت کل بیشتر نشود و سهم نقدی باقی‌مانده باشد.
+    if (loanAmount >= finalPrice) {
+      loanAmount = Math.max(0, roundNarvanAmount(finalPrice * 0.30) - SETTINGS.NARVAN_ROUND_STEP);
+    }
+
+    customerCash = finalPrice - loanAmount;
   }
 
   return {
@@ -275,9 +244,7 @@ function calculateRailTour(data) {
     profitPerPerson,
     totalProfit,
     finalPrice,
-    rawFinalPrice,
     paymentType,
-    loanPercent,
     customerCash,
     loanAmount,
     cashPercentActual: finalPrice ? (customerCash / finalPrice) * 100 : 0,
@@ -286,7 +253,7 @@ function calculateRailTour(data) {
 }
 
 function formatRailCalculation(result) {
-  const paymentTitle = result.paymentType === "loan" ? "💎 طرح الماس" : "💵 نقدی";
+  const paymentTitle = result.paymentType === "loan" ? "🌳 وام طرح نارون" : "💵 نقدی";
   let text = "🧮 محاسبه داخلی تور ریلی\n\n";
 
   text += `🚆 مسیر: ${result.routeInfo.name}\n`;
@@ -309,13 +276,13 @@ function formatRailCalculation(result) {
 
   text += "\n━━━━━━━━━━━━━━\n🚆 بلیت رفت و برگشت\n\n";
   text += `🎫 بلیت بزرگسال + صدور: ${formatMoney(result.ticket.adultRoundTrip)}\n`;
-  if (result.children > 0) text += `🎫 بلیت کودک + صدور: ${formatMoney(result.ticket.childRoundTrip)}\n`;
+  text += `🎫 بلیت کودک + صدور: ${formatMoney(result.ticket.childRoundTrip)}\n`;
 
   text += "\n━━━━━━━━━━━━━━\n🏨 هتل\n\n";
   text += `🏨 نرخ بزرگسال هر شب: ${formatMoney(result.hotelPrice)}\n`;
   text += `👧 کودک هتل: ${formatNumber(result.childHotelPercent)}٪\n`;
   text += `🏨 هزینه هتل بزرگسالان: ${formatMoney(result.adults * result.hotel.adultHotel)}\n`;
-  if (result.children > 0) text += `🏨 هزینه هتل کودکان: ${formatMoney(result.children * result.hotel.childHotel)}\n`;
+  text += `🏨 هزینه هتل کودکان: ${formatMoney(result.children * result.hotel.childHotel)}\n`;
 
   text += "\n━━━━━━━━━━━━━━\n💰 هزینه تمام‌شده\n\n";
   text += `💰 نت خرید کل: ${formatMoney(result.netPurchaseTotal)}\n`;
@@ -324,14 +291,16 @@ function formatRailCalculation(result) {
   text += `💰 قیمت نهایی فروش: ${formatMoney(result.finalPrice)}\n`;
 
   if (result.paymentType === "loan") {
-    const selectedLoanPercent = Number(result.loanPercent ?? 60);
-    const selectedCashPercent = 100 - selectedLoanPercent;
-    text += "\n━━━━━━━━━━━━━━\n💎 طرح الماس\n\n";
-    text += `📌 درصد انتخابی: ${formatNumber(selectedLoanPercent)}٪ وام / ${formatNumber(selectedCashPercent)}٪ نقد\n`;
-    text += `🔹 سهم نقدی مشتری: ${formatMoney(result.customerCash)}\n`;
-    text += `🔹 مبلغ وام: ${formatMoney(result.loanAmount)}\n`;
+    text += "\n━━━━━━━━━━━━━━\n🌳 محاسبات وام طرح نارون\n\n";
+    text += `🔹 سهم نقدی مشتری (حدود ۷۰٪): ${formatMoney(result.customerCash)}\n`;
+    text += `🔹 مبلغ تأمین شهر بهشت (حدود ۳۰٪): ${formatMoney(result.loanAmount)}\n`;
     text += `📊 سهم واقعی نقدی پس از رُند: ${result.cashPercentActual.toFixed(1)}٪\n`;
-    text += `📊 سهم واقعی وام پس از رُند: ${result.loanPercentActual.toFixed(1)}٪\n`;
+    text += `📊 سهم واقعی تأمین پس از رُند: ${result.loanPercentActual.toFixed(1)}٪\n`;
+    const interest = result.loanAmount * 0.03 * 1.5;
+    const repaymentTotal = result.loanAmount + interest;
+    text += `📈 سود کل ۱۸ ماه با نرخ سالانه ۳٪: ${formatMoney(interest)}\n`;
+    text += `💳 مجموع بازپرداخت بخش تأمین‌شده: ${formatMoney(repaymentTotal)}\n`;
+    text += `📅 قسط ماهانه تقریبی در ۱۸ ماه: ${formatMoney(repaymentTotal / 18)}\n`;
   }
 
   return text;
@@ -382,19 +351,14 @@ function calculateManualTour(data) {
   }
 
   const totalProfit = profitPerPerson * totalPassengers;
-  const rawFinalPrice = netPurchaseTotal + totalProfit;
-  const finalPrice = paymentType === "loan"
-    ? roundDiamondTotal(rawFinalPrice)
-    : roundCashAmount(rawFinalPrice);
+  const finalPrice = netPurchaseTotal + totalProfit;
   let customerCash = 0;
   let loanAmount = 0;
-  let loanPercent = null;
 
   if (paymentType === "loan") {
-    const split = applyDiamondSplit(finalPrice, data.loanPercent ?? 60);
-    customerCash = split.customerCash;
-    loanAmount = split.loanAmount;
-    loanPercent = split.loanPercent;
+    loanAmount = roundNarvanAmount(finalPrice * 0.30);
+    if (loanAmount >= finalPrice) loanAmount = Math.max(0, loanAmount - SETTINGS.LOAN_ROUND_STEP);
+    customerCash = finalPrice - loanAmount;
   }
 
   return {
@@ -421,13 +385,9 @@ function calculateManualTour(data) {
     profitPerPerson,
     totalProfit,
     finalPrice,
-    rawFinalPrice,
     paymentType,
-    loanPercent,
     loanAmount,
-    customerCash,
-    cashPercentActual: finalPrice ? (customerCash / finalPrice) * 100 : 0,
-    loanPercentActual: finalPrice ? (loanAmount / finalPrice) * 100 : 0
+    customerCash
   };
 }
 
@@ -472,7 +432,7 @@ function formatManualCalculation(result) {
 `;
   }
   text += `🏨 هتل هر بزرگسال/شب: ${formatMoney(result.hotelAdult)}\n`;
-  if (result.children > 0) text += `🏨 هتل هر کودک/شب: ${formatMoney(result.childHotel)}\n`;
+  text += `🏨 هتل هر کودک/شب: ${formatMoney(result.childHotel)}\n`;
   if (result.busRental > 0) text += `🚌 اجاره اتوبوس: ${formatMoney(result.busRental)}\n`;
   text += `\n💰 نت خرید کل: ${formatMoney(result.netPurchaseTotal)}\n`;
   text += "\n━━━━━━━━━━━━━━\n📈 سود فروش\n\n";
@@ -480,9 +440,14 @@ function formatManualCalculation(result) {
   text += `📈 سود کل: ${formatMoney(result.totalProfit)}\n`;
   text += `💰 قیمت نهایی: ${formatMoney(result.finalPrice)}\n`;
   if (result.paymentType === "loan") {
-    text += "\n━━━━━━━━━━━━━━\n💎 طرح الماس\n\n";
-    text += `💵 سهم نقدی مشتری: ${formatMoney(result.customerCash)}\n`;
-    text += `💎 مبلغ وام رُندشده: ${formatMoney(result.loanAmount)}\n`;
+    text += "\n━━━━━━━━━━━━━━\n🌳 محاسبات وام طرح نارون\n\n";
+    text += `💵 سهم نقدی مشتری (حدود ۷۰٪): ${formatMoney(result.customerCash)}\n`;
+    text += `🌳 سهم تأمین شهر بهشت (حدود ۳۰٪): ${formatMoney(result.loanAmount)}\n`;
+    const interest = result.loanAmount * 0.03 * 1.5;
+    const repaymentTotal = result.loanAmount + interest;
+    text += `📈 سود کل ۱۸ ماه با نرخ سالانه ۳٪: ${formatMoney(interest)}\n`;
+    text += `💳 مجموع بازپرداخت بخش تأمین‌شده: ${formatMoney(repaymentTotal)}\n`;
+    text += `📅 قسط ماهانه تقریبی در ۱۸ ماه: ${formatMoney(repaymentTotal / 18)}\n`;
   }
   return text;
 }
@@ -497,10 +462,7 @@ module.exports = {
   calculateManualTour,
   formatManualCalculation,
   roundLoanAmount,
-  roundUpAmount,
-  roundCashAmount,
-  roundDiamondTotal,
-  applyDiamondSplit,
+  roundNarvanAmount,
   formatMoney,
   formatNumber
 };

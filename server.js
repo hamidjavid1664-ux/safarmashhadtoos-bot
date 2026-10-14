@@ -46,6 +46,26 @@ function isAdmin(chatId) {
   return String(chatId) === String(CONFIG.ADMIN_CHAT_ID);
 }
 
+// وضعیت فعال/غیرفعال بودن درخواست‌های جدید وام طرح نارون
+let narvanEnabledCache = true;
+
+async function setNarvanEnabled(enabled) {
+  narvanEnabledCache = Boolean(enabled);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS bot_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(
+    `INSERT INTO bot_settings (setting_key, setting_value, updated_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = NOW()`,
+    ["narvan_loan_enabled", enabled ? "true" : "false"]
+  );
+}
+
 function en(v) {
   return String(v ?? "")
     .replace(/[۰-۹]/g, d =>
@@ -216,6 +236,24 @@ function validTravelDatePair(departureDate, returnDate) {
  */
 
 async function initDB() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS bot_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(
+    `INSERT INTO bot_settings (setting_key, setting_value, updated_at)
+     VALUES ($1, $2, NOW()) ON CONFLICT (setting_key) DO NOTHING`,
+    ["narvan_loan_enabled", "true"]
+  );
+  const narvanSetting = await pool.query(
+    "SELECT setting_value FROM bot_settings WHERE setting_key=$1",
+    ["narvan_loan_enabled"]
+  );
+  narvanEnabledCache = narvanSetting.rows[0]?.setting_value !== "false";
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions(
       user_id TEXT PRIMARY KEY,
@@ -1012,22 +1050,19 @@ async function askPayment(
         [
           {
             text: "💵 پرداخت نقدی",
-            callback_data:
-              "TOUR_PAYMENT_CASH"
+            callback_data: "TOUR_PAYMENT_CASH"
           }
         ],
-        [
+        ...(narvanEnabledCache && d?.tourType !== "HOTEL" ? [[
           {
             text: "🌳 وام طرح نارون",
-            callback_data:
-              "TOUR_PAYMENT_LOAN"
+            callback_data: "TOUR_PAYMENT_LOAN"
           }
-        ],
+        ]] : []),
         [
           {
             text: "🔙 بازگشت",
-            callback_data:
-              "TOUR_BACK"
+            callback_data: "TOUR_BACK"
           }
         ]
       ]
@@ -2514,6 +2549,13 @@ function managerCalcMenu(
       }
     ]
   ];
+
+  rows.push([
+    {
+      text: narvanEnabledCache ? "🌳 وام نارون: فعال ✅" : "🌳 وام نارون: غیرفعال ⛔",
+      callback_data: "ADMIN_NARVAN_STATUS"
+    }
+  ]);
 
   if (
     canSendAmount &&
@@ -4002,6 +4044,32 @@ async function handleCallback(
     cb.id
   );
 
+  if (["ADMIN_NARVAN_STATUS", "ADMIN_NARVAN_ENABLE", "ADMIN_NARVAN_DISABLE"].includes(data)) {
+    if (!isAdmin(chatId)) {
+      await sendMessage(chatId, "⛔ این بخش فقط برای مدیر ربات فعال است.");
+      return;
+    }
+    if (data === "ADMIN_NARVAN_ENABLE") {
+      await setNarvanEnabled(true);
+      await sendMessage(chatId, "✅ وام طرح نارون فعال شد. درخواست‌های جدید وام قابل ثبت هستند.", managerCalcMenu());
+      return;
+    }
+    if (data === "ADMIN_NARVAN_DISABLE") {
+      await setNarvanEnabled(false);
+      await sendMessage(chatId, "⛔ وام طرح نارون غیرفعال شد. ثبت درخواست جدید وام متوقف شد؛ پرداخت نقدی همچنان فعال است.", managerCalcMenu());
+      return;
+    }
+    await sendMessage(chatId,
+      `تنظیم وضعیت وام طرح نارون\n\nوضعیت فعلی: ${narvanEnabledCache ? "فعال ✅" : "غیرفعال ⛔"}\n\nدر حالت غیرفعال، مشتریان فقط می‌توانند پرداخت نقدی را انتخاب کنند.`,
+      { inline_keyboard: [
+        [{ text: "✅ فعال کردن وام نارون", callback_data: "ADMIN_NARVAN_ENABLE" }],
+        [{ text: "⛔ غیرفعال کردن وام نارون", callback_data: "ADMIN_NARVAN_DISABLE" }],
+        [{ text: "🔙 بازگشت به محاسبات مدیر", callback_data: "ADMIN_CALC_EXIT" }]
+      ] }
+    );
+    return;
+  }
+
   /*
    * =======================================================
    * بازخورد مشتری
@@ -4085,6 +4153,10 @@ async function handleCallback(
       data ===
         "TOUR_PAYMENT_LOAN"
     ) {
+      if (data === "TOUR_PAYMENT_LOAN" && !narvanEnabledCache) {
+        await sendMessage(chatId, "⛔ وام طرح نارون در حال حاضر غیرفعال است. لطفاً پرداخت نقدی را انتخاب کنید.", mainKeyboard());
+        return;
+      }
       const s =
         await getSession(
           chatId

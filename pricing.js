@@ -90,6 +90,22 @@ function roundNarvanAmount(amount) {
   return Math.round(toNumber(amount) / step) * step;
 }
 
+
+// مبلغ وام نارون پلکانی است و درصدی از هزینه تور نیست.
+function getNarvanLoanAmount(total) {
+  total = toNumber(total);
+  if (total <= 0) throw new Error("هزینه کل تور معتبر نیست.");
+  if (total <= 50000000) return 20000000;
+  if (total <= 80000000) return 25000000;
+  if (total <= 100000000) return 30000000;
+  throw new Error("هزینه کل تور بیشتر از ۱۰۰ میلیون تومان است و مشمول وام طرح نارون نمی‌شود.");
+}
+function getNarvanRepayment(loanAmount) {
+  const interest = loanAmount * 0.04;
+  const repaymentTotal = loanAmount + interest;
+  return { interest, repaymentTotal, monthlyInstallment: repaymentTotal / 18 };
+}
+
 function getTrainsForRoute(route) {
   return Object.entries(RAIL_TRAINS)
     .filter(([, item]) => item.route === route)
@@ -201,14 +217,8 @@ function calculateRailTour(data) {
   let loanAmount = 0;
 
   if (paymentType === "loan") {
-    loanAmount = roundNarvanAmount(finalPrice * 0.30);
-
-    // وام از قیمت کل بیشتر نشود و سهم نقدی باقی‌مانده باشد.
-    if (loanAmount >= finalPrice) {
-      loanAmount = Math.max(0, roundNarvanAmount(finalPrice * 0.30) - SETTINGS.NARVAN_ROUND_STEP);
-    }
-
-    customerCash = finalPrice - loanAmount;
+    loanAmount = getNarvanLoanAmount(finalPrice);
+    customerCash = Math.max(0, finalPrice - loanAmount);
   }
 
   return {
@@ -292,15 +302,13 @@ function formatRailCalculation(result) {
 
   if (result.paymentType === "loan") {
     text += "\n━━━━━━━━━━━━━━\n🌳 محاسبات وام طرح نارون\n\n";
-    text += `🔹 سهم نقدی مشتری (حدود ۷۰٪): ${formatMoney(result.customerCash)}\n`;
-    text += `🔹 مبلغ تأمین شهر بهشت (حدود ۳۰٪): ${formatMoney(result.loanAmount)}\n`;
-    text += `📊 سهم واقعی نقدی پس از رُند: ${result.cashPercentActual.toFixed(1)}٪\n`;
-    text += `📊 سهم واقعی تأمین پس از رُند: ${result.loanPercentActual.toFixed(1)}٪\n`;
-    const interest = result.loanAmount * 0.03 * 1.5;
-    const repaymentTotal = result.loanAmount + interest;
-    text += `📈 سود کل ۱۸ ماه با نرخ سالانه ۳٪: ${formatMoney(interest)}\n`;
-    text += `💳 مجموع بازپرداخت بخش تأمین‌شده: ${formatMoney(repaymentTotal)}\n`;
-    text += `📅 قسط ماهانه تقریبی در ۱۸ ماه: ${formatMoney(repaymentTotal / 18)}\n`;
+    text += `💵 هزینه کل تور: ${formatMoney(result.finalPrice)}\n`;
+    text += `🌳 مبلغ وام طرح نارون: ${formatMoney(result.loanAmount)}\n`;
+    text += `💰 مبلغ پرداختی مشتری: ${formatMoney(result.customerCash)}\n`;
+    const { interest, repaymentTotal, monthlyInstallment } = getNarvanRepayment(result.loanAmount);
+    text += `📈 سود ۴٪ کل دوره: ${formatMoney(interest)}\n`;
+    text += `💳 مجموع بازپرداخت وام: ${formatMoney(repaymentTotal)}\n`;
+    text += `📅 قسط ماهانه تقریبی در ۱۸ ماه: ${formatMoney(monthlyInstallment)}\n`;
   }
 
   return text;
@@ -356,9 +364,8 @@ function calculateManualTour(data) {
   let loanAmount = 0;
 
   if (paymentType === "loan") {
-    loanAmount = roundNarvanAmount(finalPrice * 0.30);
-    if (loanAmount >= finalPrice) loanAmount = Math.max(0, loanAmount - SETTINGS.LOAN_ROUND_STEP);
-    customerCash = finalPrice - loanAmount;
+    loanAmount = getNarvanLoanAmount(finalPrice);
+    customerCash = Math.max(0, finalPrice - loanAmount);
   }
 
   return {
@@ -441,13 +448,13 @@ function formatManualCalculation(result) {
   text += `💰 قیمت نهایی: ${formatMoney(result.finalPrice)}\n`;
   if (result.paymentType === "loan") {
     text += "\n━━━━━━━━━━━━━━\n🌳 محاسبات وام طرح نارون\n\n";
-    text += `💵 سهم نقدی مشتری (حدود ۷۰٪): ${formatMoney(result.customerCash)}\n`;
-    text += `🌳 سهم تأمین شهر بهشت (حدود ۳۰٪): ${formatMoney(result.loanAmount)}\n`;
-    const interest = result.loanAmount * 0.03 * 1.5;
-    const repaymentTotal = result.loanAmount + interest;
-    text += `📈 سود کل ۱۸ ماه با نرخ سالانه ۳٪: ${formatMoney(interest)}\n`;
-    text += `💳 مجموع بازپرداخت بخش تأمین‌شده: ${formatMoney(repaymentTotal)}\n`;
-    text += `📅 قسط ماهانه تقریبی در ۱۸ ماه: ${formatMoney(repaymentTotal / 18)}\n`;
+    text += `💵 هزینه کل تور: ${formatMoney(result.finalPrice)}\n`;
+    text += `🌳 مبلغ وام طرح نارون: ${formatMoney(result.loanAmount)}\n`;
+    text += `💰 مبلغ پرداختی مشتری: ${formatMoney(result.customerCash)}\n`;
+    const { interest, repaymentTotal, monthlyInstallment } = getNarvanRepayment(result.loanAmount);
+    text += `📈 سود ۴٪ کل دوره: ${formatMoney(interest)}\n`;
+    text += `💳 مجموع بازپرداخت وام: ${formatMoney(repaymentTotal)}\n`;
+    text += `📅 قسط ماهانه تقریبی در ۱۸ ماه: ${formatMoney(monthlyInstallment)}\n`;
   }
   return text;
 }

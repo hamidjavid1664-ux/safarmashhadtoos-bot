@@ -48,6 +48,7 @@ function isAdmin(chatId) {
 
 // وضعیت فعال/غیرفعال بودن درخواست‌های جدید وام طرح نارون
 let narvanEnabledCache = true;
+let narvanOverLimitEnabledCache = false;
 let trainChildTicketPercentCache = 65;
 
 async function setNarvanEnabled(enabled) {
@@ -64,6 +65,23 @@ async function setNarvanEnabled(enabled) {
      VALUES ($1, $2, NOW())
      ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = NOW()`,
     ["narvan_loan_enabled", enabled ? "true" : "false"]
+  );
+}
+
+async function setNarvanOverLimitEnabled(enabled) {
+  narvanOverLimitEnabledCache = Boolean(enabled);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS narvan_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(
+    `INSERT INTO narvan_settings (setting_key, setting_value, updated_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = NOW()`,
+    ["narvan_over_100m_enabled", enabled ? "true" : "false"]
   );
 }
 
@@ -254,6 +272,9 @@ async function initDB() {
     ["narvan_loan_enabled"]
   );
   narvanEnabledCache = narvanSetting.rows[0]?.setting_value !== "false";
+  await pool.query(`INSERT INTO narvan_settings (setting_key, setting_value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (setting_key) DO NOTHING`, ["narvan_over_100m_enabled", "false"]);
+  const overLimitSetting = await pool.query("SELECT setting_value FROM narvan_settings WHERE setting_key=$1", ["narvan_over_100m_enabled"]);
+  narvanOverLimitEnabledCache = overLimitSetting.rows[0]?.setting_value === "true";
   await pool.query(`INSERT INTO narvan_settings (setting_key, setting_value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (setting_key) DO NOTHING`, ["train_child_ticket_percent", "65"]);
   const trainPercentSetting = await pool.query("SELECT setting_value FROM narvan_settings WHERE setting_key=$1", ["train_child_ticket_percent"]);
   const parsedTrainPercent = Number(trainPercentSetting.rows[0]?.setting_value);
@@ -2561,6 +2582,12 @@ function managerCalcMenu(
       callback_data: "ADMIN_NARVAN_STATUS"
     }
   ]);
+  rows.push([
+    {
+      text: narvanOverLimitEnabledCache ? "🔓 وام بالای ۱۰۰ میلیون: مجاز ✅" : "🔒 وام بالای ۱۰۰ میلیون: غیرمجاز ⛔",
+      callback_data: "ADMIN_NARVAN_OVER_LIMIT"
+    }
+  ]);
 
   if (
     canSendAmount &&
@@ -2797,6 +2824,7 @@ async function finishAirCalc(
     PRICING.calculateManualTour({
       ...d,
       type: "AIR",
+      allowNarvanOverLimit: narvanOverLimitEnabledCache,
       paymentType,
       manualProfit: profitPerPerson,
       childPercent: 100,
@@ -3147,6 +3175,7 @@ async function manualText(
       ticketAdult: 4000000,
       childPercent: 100,
       childHotelPercent: 50,
+      allowNarvanOverLimit: narvanOverLimitEnabledCache,
       manualProfit: v,
       paymentType: "cash"
     });
@@ -3193,6 +3222,7 @@ async function manualText(
       ticketAdult: 4000000,
       childPercent: 100,
       childHotelPercent: 50,
+      allowNarvanOverLimit: narvanOverLimitEnabledCache,
       manualProfit: v,
       paymentType: "loan"
     });
@@ -3301,6 +3331,7 @@ async function manualText(
     const r =
       PRICING.calculateManualTour({
         ...d,
+        allowNarvanOverLimit: narvanOverLimitEnabledCache,
         manualProfit: v,
         paymentType:
           "cash"
@@ -4058,9 +4089,30 @@ async function handleCallback(
     cb.id
   );
 
-  if (["ADMIN_NARVAN_STATUS", "ADMIN_NARVAN_ENABLE", "ADMIN_NARVAN_DISABLE"].includes(data)) {
+  if (["ADMIN_NARVAN_STATUS", "ADMIN_NARVAN_ENABLE", "ADMIN_NARVAN_DISABLE", "ADMIN_NARVAN_OVER_LIMIT", "ADMIN_NARVAN_OVER_LIMIT_ENABLE", "ADMIN_NARVAN_OVER_LIMIT_DISABLE"].includes(data)) {
     if (!isAdmin(chatId)) {
       await sendMessage(chatId, "⛔ این بخش فقط برای مدیر ربات فعال است.");
+      return;
+    }
+    if (data === "ADMIN_NARVAN_OVER_LIMIT_ENABLE") {
+      await setNarvanOverLimitEnabled(true);
+      await sendMessage(chatId, "✅ محاسبه وام برای تورهای بالای ۱۰۰ میلیون تومان مجاز شد. در این حالت، مبلغ وام برابر سقف فعلی طرح یعنی ۳۰ میلیون تومان محاسبه می‌شود و باقی مبلغ بر عهده مشتری است.", managerCalcMenu());
+      return;
+    }
+    if (data === "ADMIN_NARVAN_OVER_LIMIT_DISABLE") {
+      await setNarvanOverLimitEnabled(false);
+      await sendMessage(chatId, "🔒 محاسبه وام برای تورهای بالای ۱۰۰ میلیون تومان غیرفعال شد.", managerCalcMenu());
+      return;
+    }
+    if (data === "ADMIN_NARVAN_OVER_LIMIT") {
+      await sendMessage(chatId,
+        `اجازه وام برای تورهای بالای ۱۰۰ میلیون تومان\n\nوضعیت فعلی: ${narvanOverLimitEnabledCache ? "مجاز ✅" : "غیرمجاز ⛔"}\n\nدر صورت فعال‌سازی، برای هزینه‌های بالای ۱۰۰ میلیون تومان، سقف فعلی وام یعنی ۳۰ میلیون تومان محاسبه می‌شود و باقی مبلغ به‌عنوان پرداخت مشتری نمایش داده می‌شود. این تنظیم فقط محاسبات مدیر را تحت تأثیر قرار می‌دهد.`,
+        { inline_keyboard: [
+          [{ text: "✅ اجازه محاسبه وام بالای ۱۰۰ میلیون", callback_data: "ADMIN_NARVAN_OVER_LIMIT_ENABLE" }],
+          [{ text: "⛔ غیرفعال کردن این اجازه", callback_data: "ADMIN_NARVAN_OVER_LIMIT_DISABLE" }],
+          [{ text: "🔙 بازگشت به محاسبات مدیر", callback_data: "ADMIN_CALC_EXIT" }]
+        ] }
+      );
       return;
     }
     if (data === "ADMIN_NARVAN_ENABLE") {
@@ -4880,6 +4932,7 @@ async function handleCallback(
       const result =
         PRICING.calculateRailTour({
           ...d,
+          allowNarvanOverLimit: narvanOverLimitEnabledCache,
 
           paymentType:
             data ===

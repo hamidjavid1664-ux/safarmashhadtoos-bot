@@ -2848,11 +2848,16 @@ async function finishAirCalc(
     );
   }
 
+  // نگه داشتن ورودی‌های اصلی باعث می‌شود با فعال‌کردن مجوز وام بالای ۱۰۰ میلیون،
+  // محاسبه قبلی مدیر فوراً و بدون ورود دوباره اطلاعات قابل به‌روزرسانی باشد.
   await saveSession(
     chatId,
     "ADMIN_CALC",
     {
-      requestCode: d.requestCode || "",
+      ...d,
+      type: "AIR",
+      paymentType,
+      manualProfit: profitPerPerson,
       calculation: result
     }
   );
@@ -4096,7 +4101,37 @@ async function handleCallback(
     }
     if (data === "ADMIN_NARVAN_OVER_LIMIT_ENABLE") {
       await setNarvanOverLimitEnabled(true);
-      await sendMessage(chatId, "✅ محاسبه وام برای تورهای بالای ۱۰۰ میلیون تومان مجاز شد. در این حالت، مبلغ وام برابر سقف فعلی طرح یعنی ۳۰ میلیون تومان محاسبه می‌شود و باقی مبلغ بر عهده مشتری است.", managerCalcMenu());
+      const current = await getSession(chatId);
+      const currentData = current?.data || {};
+      const previousCalc = currentData.calculation;
+      let recalculated = false;
+
+      // اگر مدیر همین حالا نتیجه محاسبه وام بالای سقف را روی صفحه داشته باشد،
+      // با فعال‌کردن مجوز، همان محاسبه فوراً دوباره انجام و نمایش داده می‌شود.
+      if (current?.state === "ADMIN_CALC" && previousCalc && previousCalc.paymentType === "loan" && Number(previousCalc.finalPrice || 0) > 100000000) {
+        try {
+          let updated;
+          if (String(currentData.type || previousCalc.type || "").toUpperCase() === "RAIL" || previousCalc.routeInfo) {
+            updated = PRICING.calculateRailTour({ ...currentData, paymentType: "loan", allowNarvanOverLimit: true });
+            await saveSession(chatId, "ADMIN_CALC", { ...currentData, paymentType: "loan", calculation: updated });
+            await sendMessage(chatId, "✅ مجوز فعال شد و محاسبه قبلی تور ریلی خودکار به‌روزرسانی شد.\n\n" + PRICING.formatRailCalculation(updated), managerCalcMenu(Boolean(currentData.requestCode), currentData.requestCode || ""));
+          } else {
+            updated = PRICING.calculateManualTour({ ...currentData, type: currentData.type || previousCalc.type || "AIR", paymentType: "loan", allowNarvanOverLimit: true, manualProfit: currentData.manualProfit ?? previousCalc.profitPerPerson });
+            await saveSession(chatId, "ADMIN_CALC", { ...currentData, paymentType: "loan", manualProfit: currentData.manualProfit ?? previousCalc.profitPerPerson, calculation: updated });
+            await sendMessage(chatId, "✅ مجوز فعال شد و محاسبه قبلی تور خودکار به‌روزرسانی شد.\n\n" + PRICING.formatManualCalculation(updated), managerCalcMenu(Boolean(currentData.requestCode), currentData.requestCode || ""));
+          }
+          if (currentData.requestCode) {
+            await pool.query(`UPDATE requests SET payload = payload || $2::jsonb, updated_at = NOW() WHERE request_code=$1`, [currentData.requestCode, JSON.stringify({ calculation: updated, totalCost: Number(updated.finalPrice || 0), calculatedAt: new Date().toISOString() })]);
+          }
+          recalculated = true;
+        } catch (error) {
+          console.error("Narvan over-limit auto recalculation error:", error);
+        }
+      }
+
+      if (!recalculated) {
+        await sendMessage(chatId, "✅ محاسبه وام برای تورهای بالای ۱۰۰ میلیون تومان مجاز شد. از این به بعد اگر نتیجه محاسبه وام بالای سقف روی صفحه باشد، با فعال‌سازی مجوز خودکار به‌روزرسانی می‌شود. برای محاسبه جدید هم این مجوز اعمال خواهد شد.", managerCalcMenu());
+      }
       return;
     }
     if (data === "ADMIN_NARVAN_OVER_LIMIT_DISABLE") {

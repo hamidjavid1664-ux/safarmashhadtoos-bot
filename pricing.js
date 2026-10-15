@@ -79,6 +79,12 @@ function formatNumber(value) {
   return Math.round(toNumber(value)).toLocaleString("fa-IR");
 }
 
+// مبلغ نهایی قابل پرداخت برای مشتری به میلیون تومان رو به بالا رُند می‌شود.
+function roundCustomerAmount(amount) {
+  const step = 1000000;
+  return Math.ceil(toNumber(amount) / step) * step;
+}
+
 function roundLoanAmount(amount) {
   const step = SETTINGS.LOAN_ROUND_STEP;
   return Math.round(toNumber(amount) / step) * step;
@@ -188,7 +194,7 @@ function calculateRailTour(data) {
   const netPurchaseTotal = adultsTotal + childrenTotal;
   const profitPerPerson = paymentType === "loan" ? SETTINGS.RAIL_LOAN_PROFIT : SETTINGS.RAIL_CASH_PROFIT;
   const totalProfit = profitPerPerson * totalPassengers;
-  const finalPrice = netPurchaseTotal + totalProfit;
+  const finalPrice = roundCustomerAmount(netPurchaseTotal + totalProfit);
   let customerCash = 0, loanAmount = 0, loanEligible = true, loanIneligibleReason = "";
   if (paymentType === "loan") {
     try { loanAmount = getNarvanLoanAmount(finalPrice, Boolean(data.allowNarvanOverLimit)); customerCash = Math.max(0, finalPrice - loanAmount); }
@@ -303,11 +309,15 @@ function calculateManualTour(data) {
   const ticketTotal = adultTicketTotal + childTicketTotal + infantTicketTotal;
   const hotelTotal = nights * (adults * hotelAdult + legacyHalfChildren * hotelAdult * 0.5 + fullChildren * hotelAdult);
   const netPurchaseTotal = ticketTotal + hotelTotal + busRental;
+  // اگر مدیر سود را صریح وارد کرده باشد، همان مبلغ باید اعمال شود؛
+  // در غیر این صورت از سود پیش‌فرض همان نوع تور استفاده می‌کنیم.
   let profitPerPerson = manualProfit;
-  if (type === "AIR") profitPerPerson = paymentType === "loan" ? SETTINGS.AIR_LOAN_PROFIT : SETTINGS.AIR_CASH_PROFIT;
-  else if (type === "RAIL") profitPerPerson = paymentType === "loan" ? SETTINGS.RAIL_LOAN_PROFIT : SETTINGS.RAIL_CASH_PROFIT;
+  if (data.manualProfit === undefined || data.manualProfit === null || data.manualProfit === "") {
+    if (type === "AIR") profitPerPerson = paymentType === "loan" ? SETTINGS.AIR_LOAN_PROFIT : SETTINGS.AIR_CASH_PROFIT;
+    else if (type === "RAIL") profitPerPerson = paymentType === "loan" ? SETTINGS.RAIL_LOAN_PROFIT : SETTINGS.RAIL_CASH_PROFIT;
+  }
   const totalProfit = profitPerPerson * totalPassengers;
-  const finalPrice = netPurchaseTotal + totalProfit;
+  const finalPrice = roundCustomerAmount(netPurchaseTotal + totalProfit);
   let customerCash = 0, loanAmount = 0, loanEligible = true, loanIneligibleReason = "";
   if (paymentType === "loan") {
     try { loanAmount = getNarvanLoanAmount(finalPrice, Boolean(data.allowNarvanOverLimit)); customerCash = Math.max(0, finalPrice - loanAmount); }
@@ -409,6 +419,7 @@ module.exports = {
   formatRailCalculation,
   calculateManualTour,
   formatManualCalculation,
+  roundCustomerAmount,
   roundLoanAmount,
   roundNarvanAmount,
   formatMoney,

@@ -92,12 +92,13 @@ function roundNarvanAmount(amount) {
 
 
 // مبلغ وام نارون پلکانی است و درصدی از هزینه تور نیست.
-function getNarvanLoanAmount(total) {
+function getNarvanLoanAmount(total, allowOverLimit = false) {
   total = toNumber(total);
   if (total <= 0) throw new Error("هزینه کل تور معتبر نیست.");
   if (total <= 50000000) return 20000000;
   if (total <= 80000000) return 25000000;
   if (total <= 100000000) return 30000000;
+  if (allowOverLimit) return 30000000;
   throw new Error("هزینه کل تور بیشتر از ۱۰۰ میلیون تومان است و مشمول وام طرح نارون نمی‌شود.");
 }
 function getNarvanRepayment(loanAmount) {
@@ -190,13 +191,13 @@ function calculateRailTour(data) {
   const finalPrice = netPurchaseTotal + totalProfit;
   let customerCash = 0, loanAmount = 0, loanEligible = true, loanIneligibleReason = "";
   if (paymentType === "loan") {
-    try { loanAmount = getNarvanLoanAmount(finalPrice); customerCash = Math.max(0, finalPrice - loanAmount); }
+    try { loanAmount = getNarvanLoanAmount(finalPrice, Boolean(data.allowNarvanOverLimit)); customerCash = Math.max(0, finalPrice - loanAmount); }
     catch (error) { if (finalPrice > 100000000) { loanEligible = false; loanIneligibleReason = "هزینه کل تور بیشتر از ۱۰۰ میلیون تومان است و مشمول وام طرح نارون نمی‌شود."; customerCash = finalPrice; } else throw error; }
   }
   return { route, trainKey, routeInfo: train, adults, infants, child2to3, child3to5, child5to12, children, totalPassengers, nights, hotelPrice, childTicketPercent, privateCompartment, compartmentPlan, privateCompartmentFee,
     ticket: { oneWay: train.ticket, issueFeeOneWay: issueOneWay, adultRoundTrip, childRoundTrip, adultTrainNet, childTrainNet },
     hotel: { adultHotel, childHotel: childHotelHalf, freeHotelChildren, halfHotelChildren, fullHotelChildren, childHotelCost, hotelCost: adults * adultHotel + childHotelCost },
-    adultsTotal, childrenTotal, netPurchaseTotal, profitPerPerson, totalProfit, finalPrice, paymentType, customerCash, loanAmount, loanEligible, loanIneligibleReason,
+    adultsTotal, childrenTotal, netPurchaseTotal, profitPerPerson, totalProfit, finalPrice, paymentType, customerCash, loanAmount, loanEligible, loanIneligibleReason, allowNarvanOverLimit: Boolean(data.allowNarvanOverLimit),
     cashPercentActual: finalPrice ? (customerCash / finalPrice) * 100 : 0, loanPercentActual: finalPrice ? (loanAmount / finalPrice) * 100 : 0 };
 }
 
@@ -236,6 +237,7 @@ function formatRailCalculation(result) {
   text += `🏨 هزینه هتل زیر ۳ سال: رایگان\n`;
   text += `🏨 هزینه هتل ۳ تا زیر ۵ سال: ${formatMoney((result.child3to5 || 0) * (result.hotel.childHotel || 0))}\n`;
   text += `🏨 هزینه هتل ۵ تا ۱۲ سال: ${formatMoney((result.child5to12 || 0) * result.hotel.adultHotel)}\n`;
+  text += `💰 مجموع هزینه هتل برای کل اقامت: ${formatMoney(result.hotel.hotelCost)}\n`;
 
   text += "\n━━━━━━━━━━━━━━\n💰 هزینه تمام‌شده\n\n";
   text += `💰 نت خرید کل: ${formatMoney(result.netPurchaseTotal)}\n`;
@@ -251,6 +253,7 @@ function formatRailCalculation(result) {
       text += `💵 در صورت ادامه بدون وام، مبلغ کل پرداختی نقدی: ${formatMoney(result.finalPrice)}\n`;
     } else {
       text += `🌳 مبلغ وام طرح نارون: ${formatMoney(result.loanAmount)}\n`;
+      if (result.finalPrice > 100000000 && result.allowNarvanOverLimit) text += "🔓 محاسبه با اجازه مدیر برای مبلغ بالای ۱۰۰ میلیون تومان انجام شد.\n";
       text += `💰 مبلغ پرداختی مشتری: ${formatMoney(result.customerCash)}\n`;
       const { interest, repaymentTotal, monthlyInstallment } = getNarvanRepayment(result.loanAmount);
       text += `📈 سود ۴٪ کل دوره: ${formatMoney(interest)}\n`;
@@ -307,13 +310,13 @@ function calculateManualTour(data) {
   const finalPrice = netPurchaseTotal + totalProfit;
   let customerCash = 0, loanAmount = 0, loanEligible = true, loanIneligibleReason = "";
   if (paymentType === "loan") {
-    try { loanAmount = getNarvanLoanAmount(finalPrice); customerCash = Math.max(0, finalPrice - loanAmount); }
+    try { loanAmount = getNarvanLoanAmount(finalPrice, Boolean(data.allowNarvanOverLimit)); customerCash = Math.max(0, finalPrice - loanAmount); }
     catch (error) { if (finalPrice > 100000000) { loanEligible = false; loanIneligibleReason = "هزینه کل تور بیشتر از ۱۰۰ میلیون تومان است و مشمول وام طرح نارون نمی‌شود."; customerCash = finalPrice; } else throw error; }
   }
   return { type, adults, infants, child2to3, child3to5: legacyHalfChildren, child5to12: fullChildren, freeHotelChildren: freeChildren, children, nights, totalPassengers,
     ticketAdult, ticketAdultOutbound, ticketAdultReturn, childTicket, ticketChildOutbound, ticketChildReturn, infantTicket, ticketInfantOutbound, ticketInfantReturn,
     adultTicketTotal, childTicketTotal, infantTicketTotal, childPercent, hotelAdult, childHotel, busRental, ticketTotal, hotelTotal, netPurchaseTotal,
-    profitPerPerson, totalProfit, finalPrice, paymentType, loanAmount, customerCash, loanEligible, loanIneligibleReason };
+    profitPerPerson, totalProfit, finalPrice, paymentType, loanAmount, customerCash, loanEligible, loanIneligibleReason, allowNarvanOverLimit: Boolean(data.allowNarvanOverLimit) };
 }
 
 function formatManualCalculation(result) {
@@ -371,6 +374,7 @@ function formatManualCalculation(result) {
   text += `🏨 هتل کودک زیر ۳ سال: رایگان\n`;
   text += `🏨 هتل کودک ۳ تا زیر ۵ سال/شب: ${formatMoney(result.hotelAdult * 0.5)}\n`;
   text += `🏨 هتل کودک ۵ سال به بالا/شب: ${formatMoney(result.hotelAdult)}\n`;
+  text += `💰 مجموع هزینه هتل برای ${formatNumber(result.nights)} شب: ${formatMoney(result.hotelTotal)}\n`;
   if (result.busRental > 0) text += `🚌 اجاره اتوبوس: ${formatMoney(result.busRental)}\n`;
   text += `\n💰 نت خرید کل: ${formatMoney(result.netPurchaseTotal)}\n`;
   text += "\n━━━━━━━━━━━━━━\n📈 سود فروش\n\n";
@@ -385,6 +389,7 @@ function formatManualCalculation(result) {
       text += `💵 در صورت ادامه بدون وام، مبلغ کل پرداختی نقدی: ${formatMoney(result.finalPrice)}\n`;
     } else {
       text += `🌳 مبلغ وام طرح نارون: ${formatMoney(result.loanAmount)}\n`;
+      if (result.finalPrice > 100000000 && result.allowNarvanOverLimit) text += "🔓 محاسبه با اجازه مدیر برای مبلغ بالای ۱۰۰ میلیون تومان انجام شد.\n";
       text += `💰 مبلغ پرداختی مشتری: ${formatMoney(result.customerCash)}\n`;
       const { interest, repaymentTotal, monthlyInstallment } = getNarvanRepayment(result.loanAmount);
       text += `📈 سود ۴٪ کل دوره: ${formatMoney(interest)}\n`;

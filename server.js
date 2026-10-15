@@ -48,6 +48,7 @@ function isAdmin(chatId) {
 
 // وضعیت فعال/غیرفعال بودن درخواست‌های جدید وام طرح نارون
 let narvanEnabledCache = true;
+let trainChildTicketPercentCache = 65;
 
 async function setNarvanEnabled(enabled) {
   narvanEnabledCache = Boolean(enabled);
@@ -253,6 +254,10 @@ async function initDB() {
     ["narvan_loan_enabled"]
   );
   narvanEnabledCache = narvanSetting.rows[0]?.setting_value !== "false";
+  await pool.query(`INSERT INTO narvan_settings (setting_key, setting_value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (setting_key) DO NOTHING`, ["train_child_ticket_percent", "65"]);
+  const trainPercentSetting = await pool.query("SELECT setting_value FROM narvan_settings WHERE setting_key=$1", ["train_child_ticket_percent"]);
+  const parsedTrainPercent = Number(trainPercentSetting.rows[0]?.setting_value);
+  trainChildTicketPercentCache = [60, 65, 70].includes(parsedTrainPercent) ? parsedTrainPercent : 65;
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions(
@@ -2664,21 +2669,31 @@ async function railText(
       return true;
     }
 
-    await saveSession(
-      chatId,
-      "RAIL_CHILDREN",
-      {
-        ...d,
-        adults: v
-      }
-    );
-
-    await sendMessage(
-      chatId,
-      "👶 تعداد کودک ۲ تا ۱۲ سال را وارد کنید.\nاگر کودک ندارید ۰ بفرستید:"
-    );
+    await saveSession(chatId, "RAIL_INFANTS", { ...d, adults: v });
+    await sendMessage(chatId, "👶 تعداد نوزاد ۱۰ روزه تا زیر ۲ سال را وارد کنید (بدون بلیت قطار؛ اگر ندارید ۰):");
 
     return true;
+  }
+
+  if (s.state === "RAIL_INFANTS") {
+    if (v < 0) { await sendMessage(chatId, "❌ تعداد نوزاد صحیح نیست."); return true; }
+    await saveSession(chatId, "RAIL_CHILD_2_3", { ...d, infants: v });
+    await sendMessage(chatId, "👧 تعداد کودک ۲ تا زیر ۳ سال را وارد کنید (اگر ندارید ۰):"); return true;
+  }
+  if (s.state === "RAIL_CHILD_2_3") {
+    if (v < 0) { await sendMessage(chatId, "❌ تعداد کودک صحیح نیست."); return true; }
+    await saveSession(chatId, "RAIL_CHILD_3_5", { ...d, child2to3: v });
+    await sendMessage(chatId, "👧 تعداد کودک ۳ تا زیر ۵ سال را وارد کنید (اگر ندارید ۰):"); return true;
+  }
+  if (s.state === "RAIL_CHILD_3_5") {
+    if (v < 0) { await sendMessage(chatId, "❌ تعداد کودک صحیح نیست."); return true; }
+    await saveSession(chatId, "RAIL_CHILD_5_12", { ...d, child3to5: v });
+    await sendMessage(chatId, "👦 تعداد کودک ۵ تا ۱۲ سال را وارد کنید (اگر ندارید ۰):"); return true;
+  }
+  if (s.state === "RAIL_CHILD_5_12") {
+    if (v < 0) { await sendMessage(chatId, "❌ تعداد کودک صحیح نیست."); return true; }
+    await saveSession(chatId, "RAIL_NIGHTS", { ...d, child5to12: v, children: Number(d.child2to3 || 0) + Number(d.child3to5 || 0) + v, childTicketPercent: trainChildTicketPercentCache });
+    await sendMessage(chatId, "🌙 تعداد شب اقامت را وارد کنید:"); return true;
   }
 
   if (
@@ -2751,43 +2766,12 @@ async function railText(
       return true;
     }
 
-    await saveSession(
-      chatId,
-      "RAIL_PAYMENT",
-      {
-        ...d,
-        hotelPricePerPersonPerNight:
-          v
-      }
-    );
-
-    await sendMessage(
-      chatId,
-      "💳 نوع محاسبه را انتخاب کنید:",
-      {
-        inline_keyboard: [
-          [
-            {
-              text: "💵 نقدی",
-              callback_data:
-                "RAIL_PAYMENT_CASH"
-            },
-            {
-              text: "🌳 وام طرح نارون",
-              callback_data:
-                "RAIL_PAYMENT_LOAN"
-            }
-          ],
-          [
-            {
-              text: "🔙 خروج",
-              callback_data:
-                "ADMIN_CALC_EXIT"
-            }
-          ]
-        ]
-      }
-    );
+    await saveSession(chatId, "RAIL_CHILD_PERCENT_SELECT", { ...d, hotelPricePerPersonPerNight: v, childTicketPercent: trainChildTicketPercentCache });
+    await sendMessage(chatId, `🎫 درصد بلیت کودک قطار را انتخاب کنید. مقدار فعلی: ${trainChildTicketPercentCache}٪
+این تنظیم برای محاسبات بعدی هم ذخیره می‌شود:`, { inline_keyboard: [
+      [{ text: "۶۰٪", callback_data: "TRAIN_CHILD_PERCENT_60" }, { text: "۶۵٪", callback_data: "TRAIN_CHILD_PERCENT_65" }, { text: "۷۰٪", callback_data: "TRAIN_CHILD_PERCENT_70" }],
+      [{ text: "🔙 خروج", callback_data: "ADMIN_CALC_EXIT" }]
+    ] });
 
     return true;
   }
@@ -2885,16 +2869,9 @@ async function manualText(
    * =======================================================
    */
 
-  if (
-    d.type === "AIR" &&
-    s.state === "MAN_ADULTS" &&
-    d.requestCode
-  ) {
-    await saveSession(chatId, "MAN_AIR_TICKET_ADULT_OUT", d);
-    await sendMessage(
-      chatId,
-      `✈️ محاسبه تور هوایی\n\n🆔 درخواست: ${d.requestCode}\n👨 بزرگسال: ${d.adults} نفر\n👶 کودک: ${d.children} نفر\n🌙 تعداد شب: ${d.nights}\n\n✈️ مبلغ بلیت رفت هر بزرگسال را وارد کنید:`
-    );
+  if (d.type === "AIR" && s.state === "MAN_ADULTS" && d.requestCode) {
+    await saveSession(chatId, "MAN_INFANTS", d);
+    await sendMessage(chatId, `✈️ محاسبه تور هوایی\n\n🆔 درخواست: ${d.requestCode}\n👨 بزرگسال: ${d.adults} نفر\n🌙 تعداد شب: ${d.nights}\n\n👶 تعداد نوزاد ۱۰ روزه تا زیر ۲ سال را وارد کنید:`);
     return true;
   }
 
@@ -2914,12 +2891,33 @@ async function manualText(
       return true;
     }
     const next = {...d, ticketAdultReturn: v};
+    if (Number(d.infants || 0) > 0) {
+      await saveSession(chatId, "MAN_AIR_TICKET_INFANT_OUT", next);
+      await sendMessage(chatId, "👶 مبلغ بلیت رفت هر نوزاد زیر ۲ سال را وارد کنید:");
+    } else if (Number(d.children || 0) > 0) {
+      await saveSession(chatId, "MAN_AIR_TICKET_CHILD_OUT", {...next, ticketInfantOutbound: 0, ticketInfantReturn: 0});
+      await sendMessage(chatId, "👧 مبلغ بلیت رفت هر کودک ۲ تا ۱۲ سال را وارد کنید:");
+    } else {
+      await saveSession(chatId, "MAN_AIR_PAYMENT", {...next, ticketChildOutbound: 0, ticketChildReturn: 0, ticketInfantOutbound: 0, ticketInfantReturn: 0});
+      await sendMessage(chatId, "🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:");
+    }
+    return true;
+  }
+
+  if (d.type === "AIR" && s.state === "MAN_AIR_TICKET_INFANT_OUT") {
+    if (v < 0) { await sendMessage(chatId, "❌ مبلغ بلیت رفت نوزاد صحیح نیست."); return true; }
+    await saveSession(chatId, "MAN_AIR_TICKET_INFANT_BACK", { ...d, ticketInfantOutbound: v });
+    await sendMessage(chatId, "👶 مبلغ بلیت برگشت هر نوزاد زیر ۲ سال را وارد کنید:"); return true;
+  }
+  if (d.type === "AIR" && s.state === "MAN_AIR_TICKET_INFANT_BACK") {
+    if (v < 0) { await sendMessage(chatId, "❌ مبلغ بلیت برگشت نوزاد صحیح نیست."); return true; }
+    const next = { ...d, ticketInfantReturn: v };
     if (Number(d.children || 0) > 0) {
       await saveSession(chatId, "MAN_AIR_TICKET_CHILD_OUT", next);
-      await sendMessage(chatId, "👶 مبلغ بلیت رفت هر کودک ۳ تا ۵ سال را وارد کنید:");
+      await sendMessage(chatId, "👧 مبلغ بلیت رفت هر کودک ۲ تا ۱۲ سال را وارد کنید:");
     } else {
-      await saveSession(chatId, "MAN_AIR_PAYMENT", {...next, ticketChildOutbound: 0, ticketChildReturn: 0});
-      await sendMessage(chatId, "🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:\n\n👶 کودک ۳ تا ۵ سال به‌صورت خودکار نیم‌بهای بزرگسال محاسبه می‌شود.");
+      await saveSession(chatId, "MAN_AIR_PAYMENT", { ...next, ticketChildOutbound: 0, ticketChildReturn: 0 });
+      await sendMessage(chatId, "🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:");
     }
     return true;
   }
@@ -2930,7 +2928,7 @@ async function manualText(
       return true;
     }
     await saveSession(chatId, "MAN_AIR_TICKET_CHILD_BACK", {...d, ticketChildOutbound: v});
-    await sendMessage(chatId, "👶 مبلغ بلیت برگشت هر کودک ۳ تا ۵ سال را وارد کنید:");
+    await sendMessage(chatId, "👧 مبلغ بلیت برگشت هر کودک ۲ تا ۱۲ سال را وارد کنید:");
     return true;
   }
 
@@ -2940,7 +2938,7 @@ async function manualText(
       return true;
     }
     await saveSession(chatId, "MAN_AIR_PAYMENT", {...d, ticketChildReturn: v});
-    await sendMessage(chatId, "🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:\n\n👶 کودک ۳ تا ۵ سال به‌صورت خودکار نیم‌بهای بزرگسال محاسبه می‌شود.");
+    await sendMessage(chatId, "🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید.\nمحاسبه خودکار هتل: زیر ۳ سال رایگان، ۳ تا زیر ۵ سال نیم‌بها، ۵ سال به بالا کامل.");
     return true;
   }
 
@@ -2992,21 +2990,37 @@ async function manualText(
       return true;
     }
 
-    await saveSession(
-      chatId,
-      "MAN_CHILDREN",
-      {
-        ...d,
-        adults: v
-      }
-    );
-
-    await sendMessage(
-      chatId,
-      "👶 تعداد کودک را وارد کنید:"
-    );
+    if (d.type === "AIR") {
+      await saveSession(chatId, "MAN_INFANTS", { ...d, adults: v });
+      await sendMessage(chatId, "👶 تعداد نوزاد ۱۰ روزه تا زیر ۲ سال را وارد کنید:");
+    } else {
+      await saveSession(chatId, "MAN_CHILDREN", { ...d, adults: v });
+      await sendMessage(chatId, "👶 تعداد کودک را وارد کنید:");
+    }
 
     return true;
+  }
+
+  if (d.type === "AIR" && s.state === "MAN_INFANTS") {
+    if (v < 0) { await sendMessage(chatId, "❌ تعداد نوزاد صحیح نیست."); return true; }
+    await saveSession(chatId, "MAN_CHILD_2_3", { ...d, infants: v });
+    await sendMessage(chatId, "👧 تعداد کودک ۲ تا زیر ۳ سال را وارد کنید:"); return true;
+  }
+  if (d.type === "AIR" && s.state === "MAN_CHILD_2_3") {
+    if (v < 0) { await sendMessage(chatId, "❌ تعداد کودک صحیح نیست."); return true; }
+    await saveSession(chatId, "MAN_CHILD_3_5", { ...d, child2to3: v });
+    await sendMessage(chatId, "👧 تعداد کودک ۳ تا زیر ۵ سال را وارد کنید:"); return true;
+  }
+  if (d.type === "AIR" && s.state === "MAN_CHILD_3_5") {
+    if (v < 0) { await sendMessage(chatId, "❌ تعداد کودک صحیح نیست."); return true; }
+    await saveSession(chatId, "MAN_CHILD_5_12", { ...d, child3to5: v });
+    await sendMessage(chatId, "👦 تعداد کودک ۵ تا ۱۲ سال را وارد کنید:"); return true;
+  }
+  if (d.type === "AIR" && s.state === "MAN_CHILD_5_12") {
+    if (v < 0) { await sendMessage(chatId, "❌ تعداد کودک صحیح نیست."); return true; }
+    const children = Number(d.child2to3 || 0) + Number(d.child3to5 || 0) + v;
+    await saveSession(chatId, "MAN_NIGHTS", { ...d, child5to12: v, children });
+    await sendMessage(chatId, "🌙 تعداد شب اقامت را وارد کنید:"); return true;
   }
 
   if (
@@ -4829,6 +4843,20 @@ async function handleCallback(
    * =======================================================
    */
 
+  if (["TRAIN_CHILD_PERCENT_60", "TRAIN_CHILD_PERCENT_65", "TRAIN_CHILD_PERCENT_70"].includes(data) && isAdmin(chatId)) {
+    const selected = Number(data.split("_").pop());
+    trainChildTicketPercentCache = selected;
+    await pool.query(`INSERT INTO narvan_settings (setting_key, setting_value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (setting_key) DO UPDATE SET setting_value=EXCLUDED.setting_value, updated_at=NOW()`, ["train_child_ticket_percent", String(selected)]);
+    const ss = await getSession(chatId);
+    const d = { ...(ss?.data || {}), childTicketPercent: selected };
+    await saveSession(chatId, "RAIL_PAYMENT", d);
+    await sendMessage(chatId, `✅ درصد بلیت کودک قطار روی ${selected}٪ ذخیره شد.\n💳 نوع محاسبه را انتخاب کنید:`, { inline_keyboard: [
+      [{ text: "💵 نقدی", callback_data: "RAIL_PAYMENT_CASH" }, { text: "🌳 وام طرح نارون", callback_data: "RAIL_PAYMENT_LOAN" }],
+      [{ text: "🔙 خروج", callback_data: "ADMIN_CALC_EXIT" }]
+    ] });
+    return;
+  }
+
   if (
     (
       data ===
@@ -4863,7 +4891,7 @@ async function handleCallback(
             50,
 
           childTicketPercent:
-            60,
+            Number(d.childTicketPercent || trainChildTicketPercentCache),
 
           berthOption:
             d.berthOption ||

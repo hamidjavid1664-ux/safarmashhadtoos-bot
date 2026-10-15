@@ -52,14 +52,14 @@ let narvanEnabledCache = true;
 async function setNarvanEnabled(enabled) {
   narvanEnabledCache = Boolean(enabled);
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS bot_settings (
+    CREATE TABLE IF NOT EXISTS narvan_settings (
       setting_key TEXT PRIMARY KEY,
       setting_value TEXT NOT NULL,
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
   await pool.query(
-    `INSERT INTO bot_settings (setting_key, setting_value, updated_at)
+    `INSERT INTO narvan_settings (setting_key, setting_value, updated_at)
      VALUES ($1, $2, NOW())
      ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = NOW()`,
     ["narvan_loan_enabled", enabled ? "true" : "false"]
@@ -237,19 +237,19 @@ function validTravelDatePair(departureDate, returnDate) {
 
 async function initDB() {
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS bot_settings (
+    CREATE TABLE IF NOT EXISTS narvan_settings (
       setting_key TEXT PRIMARY KEY,
       setting_value TEXT NOT NULL,
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
   await pool.query(
-    `INSERT INTO bot_settings (setting_key, setting_value, updated_at)
+    `INSERT INTO narvan_settings (setting_key, setting_value, updated_at)
      VALUES ($1, $2, NOW()) ON CONFLICT (setting_key) DO NOTHING`,
     ["narvan_loan_enabled", "true"]
   );
   const narvanSetting = await pool.query(
-    "SELECT setting_value FROM bot_settings WHERE setting_key=$1",
+    "SELECT setting_value FROM narvan_settings WHERE setting_key=$1",
     ["narvan_loan_enabled"]
   );
   narvanEnabledCache = narvanSetting.rows[0]?.setting_value !== "false";

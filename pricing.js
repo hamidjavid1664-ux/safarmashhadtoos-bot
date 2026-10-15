@@ -138,142 +138,66 @@ function getCompartmentPlan(passengers, capacity) {
 function calculateRailTour(data) {
   const route = String(data.route || "AHVAZ").toUpperCase();
   const adults = Math.floor(toNumber(data.adults));
-  const children = Math.floor(toNumber(data.children));
-  const totalPassengers = adults + children;
+  const infants = Math.floor(toNumber(data.infants));
+  const child2to3 = Math.floor(toNumber(data.child2to3));
+  const child3to5 = Math.floor(toNumber(data.child3to5));
+  const child5to12 = Math.floor(toNumber(data.child5to12));
+  const legacyChildren = Math.floor(toNumber(data.children));
+  const hasAgeGroups = [data.child2to3, data.child3to5, data.child5to12].some(v => v !== undefined);
+  const children = hasAgeGroups ? child2to3 + child3to5 + child5to12 : legacyChildren;
+  const totalPassengers = adults + infants + children;
   const nights = Math.floor(toNumber(data.nights || SETTINGS.RAIL_NIGHTS));
-  const hotelPrice = toNumber(
-    data.hotelPricePerPersonPerNight || data.hotelPrice || SETTINGS.HOTEL_PRICE_PER_NIGHT
-  );
-  const childHotelPercent = toNumber(
-    data.childHotelPercent ?? SETTINGS.HOTEL_CHILD_PERCENT
-  );
-  const childTicketPercent = toNumber(
-    data.childTicketPercent ?? SETTINGS.TRAIN_CHILD_TICKET_PERCENT
-  );
+  const hotelPrice = toNumber(data.hotelPricePerPersonPerNight || data.hotelPrice || SETTINGS.HOTEL_PRICE_PER_NIGHT);
+  const childTicketPercent = Math.min(100, Math.max(0, toNumber(data.childTicketPercent ?? SETTINGS.TRAIN_CHILD_TICKET_PERCENT)));
   const paymentType = data.paymentType === "loan" ? "loan" : "cash";
   const privateCompartment = Boolean(data.privateCompartment);
-
   if (adults <= 0) throw new Error("تعداد بزرگسال باید حداقل ۱ نفر باشد.");
-  if (children < 0) throw new Error("تعداد کودک نامعتبر است.");
+  if ([infants, child2to3, child3to5, child5to12, children].some(n => n < 0)) throw new Error("تعداد کودک نامعتبر است.");
   if (nights <= 0) throw new Error("تعداد شب اقامت نامعتبر است.");
   if (hotelPrice <= 0) throw new Error("قیمت هتل وارد نشده است.");
-
   let trainKey = data.trainKey || data.train;
   let train = trainKey ? RAIL_TRAINS[trainKey] : null;
-
-  if (!train) {
-    const trains = getTrainsForRoute(route);
-    if (!trains.length) throw new Error("مسیر ریلی پیدا نشد.");
-    train = trains[0];
-    trainKey = train.key;
-  }
-
+  if (!train) { const trains = getTrainsForRoute(route); if (!trains.length) throw new Error("مسیر ریلی پیدا نشد."); train = trains[0]; trainKey = train.key; }
   if (train.route !== route) throw new Error("قطار انتخاب‌شده با مسیر هماهنگ نیست.");
-
   const issueOneWay = SETTINGS.TICKET_ISSUE_FEE_ONE_WAY;
   const adultRoundTrip = (train.ticket + issueOneWay) * 2;
   const childTicketOneWay = train.ticket * childTicketPercent / 100;
   const childRoundTrip = (childTicketOneWay + issueOneWay) * 2;
-
-  let adultTrainNet = adultRoundTrip;
-  let childTrainNet = childRoundTrip;
-  let privateCompartmentFee = 0;
-  let compartmentPlan = null;
-
+  let adultTrainNet = adultRoundTrip, childTrainNet = childRoundTrip, privateCompartmentFee = 0, compartmentPlan = null;
   if (privateCompartment) {
-    if (totalPassengers !== 3 && totalPassengers !== 5) {
-      throw new Error("اجاره کوپه اختصاصی طبق فرمول فعلی فقط برای ۳ یا ۵ نفر فعال است.");
-    }
-
+    if (totalPassengers !== 3 && totalPassengers !== 5) throw new Error("اجاره کوپه اختصاصی طبق فرمول فعلی فقط برای ۳ یا ۵ نفر فعال است.");
     compartmentPlan = getCompartmentPlan(totalPassengers, train.capacity);
-
-    // طبق فرمول شما: بلیت + صدور × ۲، سپس ۸۰۰ هزار برای هر تخت خالی ÷ تعداد نفرات
-    privateCompartmentFee =
-      SETTINGS.EMPTY_BERTH_FEE * compartmentPlan.emptyBerths;
-
+    privateCompartmentFee = SETTINGS.EMPTY_BERTH_FEE * compartmentPlan.emptyBerths;
     const baseRoundTripPerPerson = (train.ticket + issueOneWay) * 2;
     const extraPerPerson = privateCompartmentFee / totalPassengers;
-
     adultTrainNet = baseRoundTripPerPerson + extraPerPerson;
     childTrainNet = baseRoundTripPerPerson + extraPerPerson;
   }
-
+  // هتل: زیر ۳ سال رایگان؛ ۳ تا زیر ۵ سال نیم‌بها؛ ۵ سال به بالا کامل.
   const adultHotel = hotelPrice * nights;
-  const childHotel = hotelPrice * childHotelPercent / 100 * nights;
-
+  const freeHotelChildren = infants + child2to3;
+  const halfHotelChildren = child3to5;
+  const fullHotelChildren = hasAgeGroups ? child5to12 : legacyChildren;
+  const childHotelHalf = hotelPrice * 0.5 * nights;
+  const childHotelFull = adultHotel;
   const adultsTotal = (adultTrainNet + adultHotel) * adults;
-  const childrenTotal = (childTrainNet + childHotel) * children;
+  const childTicketCost = childTrainNet * children;
+  const childHotelCost = halfHotelChildren * childHotelHalf + fullHotelChildren * childHotelFull;
+  const childrenTotal = childTicketCost + childHotelCost;
   const netPurchaseTotal = adultsTotal + childrenTotal;
-
-  const profitPerPerson =
-    paymentType === "loan"
-      ? SETTINGS.RAIL_LOAN_PROFIT
-      : SETTINGS.RAIL_CASH_PROFIT;
-
+  const profitPerPerson = paymentType === "loan" ? SETTINGS.RAIL_LOAN_PROFIT : SETTINGS.RAIL_CASH_PROFIT;
   const totalProfit = profitPerPerson * totalPassengers;
   const finalPrice = netPurchaseTotal + totalProfit;
-
-  let customerCash = 0;
-  let loanAmount = 0;
-  let loanEligible = true;
-  let loanIneligibleReason = "";
-
+  let customerCash = 0, loanAmount = 0, loanEligible = true, loanIneligibleReason = "";
   if (paymentType === "loan") {
-    // نامشمول بودن وام نباید محاسبه کل تور را متوقف کند.
-    try {
-      loanAmount = getNarvanLoanAmount(finalPrice);
-      customerCash = Math.max(0, finalPrice - loanAmount);
-    } catch (error) {
-      if (finalPrice > 100000000) {
-        loanEligible = false;
-        loanIneligibleReason = "هزینه کل تور بیشتر از ۱۰۰ میلیون تومان است و مشمول وام طرح نارون نمی‌شود.";
-        // مبلغ کل همچنان محاسبه می‌شود؛ در صورت ادامه بدون وام، کل مبلغ نقدی است.
-        customerCash = finalPrice;
-      } else {
-        throw error;
-      }
-    }
+    try { loanAmount = getNarvanLoanAmount(finalPrice); customerCash = Math.max(0, finalPrice - loanAmount); }
+    catch (error) { if (finalPrice > 100000000) { loanEligible = false; loanIneligibleReason = "هزینه کل تور بیشتر از ۱۰۰ میلیون تومان است و مشمول وام طرح نارون نمی‌شود."; customerCash = finalPrice; } else throw error; }
   }
-
-  return {
-    route,
-    trainKey,
-    routeInfo: train,
-    adults,
-    children,
-    totalPassengers,
-    nights,
-    hotelPrice,
-    childHotelPercent,
-    childTicketPercent,
-    privateCompartment,
-    compartmentPlan,
-    privateCompartmentFee,
-    ticket: {
-      oneWay: train.ticket,
-      issueFeeOneWay: issueOneWay,
-      adultRoundTrip,
-      childRoundTrip,
-      adultTrainNet,
-      childTrainNet
-    },
-    hotel: {
-      adultHotel,
-      childHotel,
-      hotelCost: adults * adultHotel + children * childHotel
-    },
-    adultsTotal,
-    childrenTotal,
-    netPurchaseTotal,
-    profitPerPerson,
-    totalProfit,
-    finalPrice,
-    paymentType,
-    customerCash,
-    loanAmount,
-    cashPercentActual: finalPrice ? (customerCash / finalPrice) * 100 : 0,
-    loanPercentActual: finalPrice ? (loanAmount / finalPrice) * 100 : 0
-  };
+  return { route, trainKey, routeInfo: train, adults, infants, child2to3, child3to5, child5to12, children, totalPassengers, nights, hotelPrice, childTicketPercent, privateCompartment, compartmentPlan, privateCompartmentFee,
+    ticket: { oneWay: train.ticket, issueFeeOneWay: issueOneWay, adultRoundTrip, childRoundTrip, adultTrainNet, childTrainNet },
+    hotel: { adultHotel, childHotel: childHotelHalf, freeHotelChildren, halfHotelChildren, fullHotelChildren, childHotelCost, hotelCost: adults * adultHotel + childHotelCost },
+    adultsTotal, childrenTotal, netPurchaseTotal, profitPerPerson, totalProfit, finalPrice, paymentType, customerCash, loanAmount, loanEligible, loanIneligibleReason,
+    cashPercentActual: finalPrice ? (customerCash / finalPrice) * 100 : 0, loanPercentActual: finalPrice ? (loanAmount / finalPrice) * 100 : 0 };
 }
 
 function formatRailCalculation(result) {
@@ -284,7 +208,10 @@ function formatRailCalculation(result) {
   text += `🚃 قطار: ${result.routeInfo.train}\n`;
   text += `⭐ ${result.routeInfo.stars}\n`;
   text += `👨 بزرگسال: ${formatNumber(result.adults)} نفر\n`;
-  text += `👧 کودک: ${formatNumber(result.children)} نفر\n`;
+  text += `👶 نوزاد زیر ۲ سال: ${formatNumber(result.infants || 0)} نفر\n`;
+  text += `👧 کودک ۲ تا زیر ۳ سال: ${formatNumber(result.child2to3 || 0)} نفر\n`;
+  text += `👧 کودک ۳ تا زیر ۵ سال: ${formatNumber(result.child3to5 || 0)} نفر\n`;
+  text += `👦 کودک ۵ تا ۱۲ سال: ${formatNumber(result.child5to12 || 0)} نفر\n`;
   text += `👥 مجموع: ${formatNumber(result.totalPassengers)} نفر\n`;
   text += `🌙 اقامت: ${formatNumber(result.nights)} شب\n`;
   text += `💳 پرداخت: ${paymentTitle}\n`;
@@ -300,13 +227,15 @@ function formatRailCalculation(result) {
 
   text += "\n━━━━━━━━━━━━━━\n🚆 بلیت رفت و برگشت\n\n";
   text += `🎫 بلیت بزرگسال + صدور: ${formatMoney(result.ticket.adultRoundTrip)}\n`;
-  text += `🎫 بلیت کودک + صدور: ${formatMoney(result.ticket.childRoundTrip)}\n`;
+  text += `🎫 بلیت کودک ۲ تا ۱۲ سال با درصد ${formatNumber(result.childTicketPercent)}٪: ${formatMoney(result.ticket.childRoundTrip)}\n`;
+  text += `👶 بلیت نوزاد زیر ۲ سال: رایگان\n`;
 
   text += "\n━━━━━━━━━━━━━━\n🏨 هتل\n\n";
   text += `🏨 نرخ بزرگسال هر شب: ${formatMoney(result.hotelPrice)}\n`;
-  text += `👧 کودک هتل: ${formatNumber(result.childHotelPercent)}٪\n`;
   text += `🏨 هزینه هتل بزرگسالان: ${formatMoney(result.adults * result.hotel.adultHotel)}\n`;
-  text += `🏨 هزینه هتل کودکان: ${formatMoney(result.children * result.hotel.childHotel)}\n`;
+  text += `🏨 هزینه هتل زیر ۳ سال: رایگان\n`;
+  text += `🏨 هزینه هتل ۳ تا زیر ۵ سال: ${formatMoney((result.child3to5 || 0) * (result.hotel.childHotel || 0))}\n`;
+  text += `🏨 هزینه هتل ۵ تا ۱۲ سال: ${formatMoney((result.child5to12 || 0) * result.hotel.adultHotel)}\n`;
 
   text += "\n━━━━━━━━━━━━━━\n💰 هزینه تمام‌شده\n\n";
   text += `💰 نت خرید کل: ${formatMoney(result.netPurchaseTotal)}\n`;
@@ -336,100 +265,55 @@ function formatRailCalculation(result) {
 function calculateManualTour(data) {
   const type = String(data.type || "BUS").toUpperCase();
   const adults = Math.floor(toNumber(data.adults));
-  const children = Math.floor(toNumber(data.children));
+  const infants = Math.floor(toNumber(data.infants));
+  const child2to3 = Math.floor(toNumber(data.child2to3));
+  const child3to5 = Math.floor(toNumber(data.child3to5));
+  const child5to12 = Math.floor(toNumber(data.child5to12));
+  const legacyChildren = Math.floor(toNumber(data.children));
+  const hasAgeGroups = [data.child2to3, data.child3to5, data.child5to12].some(v => v !== undefined);
+  const children = hasAgeGroups ? child2to3 + child3to5 + child5to12 : legacyChildren;
   const nights = Math.floor(toNumber(data.nights));
-
-  // برای تور هوایی قیمت رفت و برگشت بزرگسال و کودک جداگانه وارد می‌شود.
   const ticketAdultOutbound = toNumber(data.ticketAdultOutbound ?? data.ticketAdult);
   const ticketAdultReturn = toNumber(data.ticketAdultReturn ?? 0);
   const ticketChildOutbound = toNumber(data.ticketChildOutbound ?? 0);
   const ticketChildReturn = toNumber(data.ticketChildReturn ?? 0);
-
-  const ticketAdult = type === "AIR"
-    ? ticketAdultOutbound + ticketAdultReturn
-    : toNumber(data.ticketAdult);
-
+  const ticketInfantOutbound = toNumber(data.ticketInfantOutbound ?? 0);
+  const ticketInfantReturn = toNumber(data.ticketInfantReturn ?? 0);
+  const ticketAdult = type === "AIR" ? ticketAdultOutbound + ticketAdultReturn : toNumber(data.ticketAdult);
   const childPercent = toNumber(data.childPercent ?? 100);
-  const childTicket = type === "AIR"
-    ? ticketChildOutbound + ticketChildReturn
-    : ticketAdult * childPercent / 100;
-
+  const childTicket = type === "AIR" ? ticketChildOutbound + ticketChildReturn : ticketAdult * childPercent / 100;
+  const infantTicket = type === "AIR" ? ticketInfantOutbound + ticketInfantReturn : 0;
   const hotelAdult = toNumber(data.hotelAdult || SETTINGS.HOTEL_PRICE_PER_NIGHT);
   const busRental = toNumber(data.busRental);
   const manualProfit = toNumber(data.manualProfit);
   const paymentType = data.paymentType === "loan" ? "loan" : "cash";
-
-  const totalPassengers = adults + children;
+  const totalPassengers = adults + infants + children;
   if (totalPassengers <= 0) throw new Error("تعداد مسافران باید بیشتر از صفر باشد.");
-  if (nights <= 0) throw new Error("تعداد شب اقامت باید بیشتر از صفر باشد.");
-
-  const childHotel = hotelAdult * SETTINGS.HOTEL_CHILD_PERCENT / 100;
+  if (nights <= 0) throw new Error("تعداد شب اقامت نامعتبر است.");
+  const legacyHalfChildren = hasAgeGroups ? child3to5 : legacyChildren;
+  const fullChildren = hasAgeGroups ? child5to12 : 0;
+  const freeChildren = infants + child2to3;
+  const childHotel = hotelAdult * 0.5;
   const adultTicketTotal = adults * ticketAdult;
   const childTicketTotal = children * childTicket;
-  const ticketTotal = adultTicketTotal + childTicketTotal;
-  const hotelTotal = nights * (adults * hotelAdult + children * childHotel);
+  const infantTicketTotal = infants * infantTicket;
+  const ticketTotal = adultTicketTotal + childTicketTotal + infantTicketTotal;
+  const hotelTotal = nights * (adults * hotelAdult + legacyHalfChildren * hotelAdult * 0.5 + fullChildren * hotelAdult);
   const netPurchaseTotal = ticketTotal + hotelTotal + busRental;
-
   let profitPerPerson = manualProfit;
-  if (type === "AIR") {
-    profitPerPerson = paymentType === "loan" ? SETTINGS.AIR_LOAN_PROFIT : SETTINGS.AIR_CASH_PROFIT;
-  } else if (type === "RAIL") {
-    profitPerPerson = paymentType === "loan" ? SETTINGS.RAIL_LOAN_PROFIT : SETTINGS.RAIL_CASH_PROFIT;
-  }
-
+  if (type === "AIR") profitPerPerson = paymentType === "loan" ? SETTINGS.AIR_LOAN_PROFIT : SETTINGS.AIR_CASH_PROFIT;
+  else if (type === "RAIL") profitPerPerson = paymentType === "loan" ? SETTINGS.RAIL_LOAN_PROFIT : SETTINGS.RAIL_CASH_PROFIT;
   const totalProfit = profitPerPerson * totalPassengers;
   const finalPrice = netPurchaseTotal + totalProfit;
-  let customerCash = 0;
-  let loanAmount = 0;
-  let loanEligible = true;
-  let loanIneligibleReason = "";
-
+  let customerCash = 0, loanAmount = 0, loanEligible = true, loanIneligibleReason = "";
   if (paymentType === "loan") {
-    // نامشمول بودن وام نباید محاسبه کل تور را متوقف کند.
-    try {
-      loanAmount = getNarvanLoanAmount(finalPrice);
-      customerCash = Math.max(0, finalPrice - loanAmount);
-    } catch (error) {
-      if (finalPrice > 100000000) {
-        loanEligible = false;
-        loanIneligibleReason = "هزینه کل تور بیشتر از ۱۰۰ میلیون تومان است و مشمول وام طرح نارون نمی‌شود.";
-        customerCash = finalPrice;
-      } else {
-        throw error;
-      }
-    }
+    try { loanAmount = getNarvanLoanAmount(finalPrice); customerCash = Math.max(0, finalPrice - loanAmount); }
+    catch (error) { if (finalPrice > 100000000) { loanEligible = false; loanIneligibleReason = "هزینه کل تور بیشتر از ۱۰۰ میلیون تومان است و مشمول وام طرح نارون نمی‌شود."; customerCash = finalPrice; } else throw error; }
   }
-
-  return {
-    type,
-    adults,
-    children,
-    nights,
-    totalPassengers,
-    ticketAdult,
-    ticketAdultOutbound,
-    ticketAdultReturn,
-    childTicket,
-    ticketChildOutbound,
-    ticketChildReturn,
-    adultTicketTotal,
-    childTicketTotal,
-    childPercent,
-    hotelAdult,
-    childHotel,
-    busRental,
-    ticketTotal,
-    hotelTotal,
-    netPurchaseTotal,
-    profitPerPerson,
-    totalProfit,
-    finalPrice,
-    paymentType,
-    loanAmount,
-    customerCash,
-    loanEligible,
-    loanIneligibleReason
-  };
+  return { type, adults, infants, child2to3, child3to5: legacyHalfChildren, child5to12: fullChildren, freeHotelChildren: freeChildren, children, nights, totalPassengers,
+    ticketAdult, ticketAdultOutbound, ticketAdultReturn, childTicket, ticketChildOutbound, ticketChildReturn, infantTicket, ticketInfantOutbound, ticketInfantReturn,
+    adultTicketTotal, childTicketTotal, infantTicketTotal, childPercent, hotelAdult, childHotel, busRental, ticketTotal, hotelTotal, netPurchaseTotal,
+    profitPerPerson, totalProfit, finalPrice, paymentType, loanAmount, customerCash, loanEligible, loanIneligibleReason };
 }
 
 function formatManualCalculation(result) {
@@ -445,7 +329,10 @@ function formatManualCalculation(result) {
   let text = "🧮 محاسبه داخلی مدیر\n\n";
   text += `🚍 نوع سفر: ${names[result.type] || result.type}\n`;
   text += `👨 بزرگسال: ${formatNumber(result.adults)} نفر\n`;
-  text += `👧 کودک ۳ تا ۵ سال: ${formatNumber(result.children)} نفر\n`;
+  text += `👶 نوزاد زیر ۲ سال: ${formatNumber(result.infants || 0)} نفر\n`;
+  text += `👧 کودک ۲ تا زیر ۳ سال: ${formatNumber(result.child2to3 || 0)} نفر\n`;
+  text += `👧 کودک ۳ تا زیر ۵ سال: ${formatNumber(result.child3to5 || 0)} نفر\n`;
+  text += `👦 کودک ۵ تا ۱۲ سال: ${formatNumber(result.child5to12 || 0)} نفر\n`;
   text += `👥 مجموع: ${formatNumber(result.totalPassengers)} نفر\n`;
   text += `🌙 اقامت: ${formatNumber(result.nights)} شب\n\n`;
   text += "━━━━━━━━━━━━━━\n💰 هزینه‌ها\n\n";
@@ -462,7 +349,15 @@ function formatManualCalculation(result) {
 `;
     text += `🎫 مجموع بلیت رفت‌وبرگشت هر کودک: ${formatMoney(result.childTicket)}
 `;
+    text += `👶 بلیت نوزاد - رفت: ${formatMoney(result.ticketInfantOutbound || 0)}
+`;
+    text += `👶 بلیت نوزاد - برگشت: ${formatMoney(result.ticketInfantReturn || 0)}
+`;
+    text += `🎫 مجموع بلیت رفت‌وبرگشت هر نوزاد: ${formatMoney(result.infantTicket || 0)}
+`;
     text += `💰 مجموع بلیت بزرگسالان: ${formatMoney(result.adultTicketTotal)}
+`;
+    text += `💰 مجموع بلیت نوزادان: ${formatMoney(result.infantTicketTotal || 0)}
 `;
     text += `💰 مجموع بلیت کودکان: ${formatMoney(result.childTicketTotal)}
 `;
@@ -473,7 +368,9 @@ function formatManualCalculation(result) {
 `;
   }
   text += `🏨 هتل هر بزرگسال/شب: ${formatMoney(result.hotelAdult)}\n`;
-  text += `🏨 هتل هر کودک/شب: ${formatMoney(result.childHotel)}\n`;
+  text += `🏨 هتل کودک زیر ۳ سال: رایگان\n`;
+  text += `🏨 هتل کودک ۳ تا زیر ۵ سال/شب: ${formatMoney(result.hotelAdult * 0.5)}\n`;
+  text += `🏨 هتل کودک ۵ سال به بالا/شب: ${formatMoney(result.hotelAdult)}\n`;
   if (result.busRental > 0) text += `🚌 اجاره اتوبوس: ${formatMoney(result.busRental)}\n`;
   text += `\n💰 نت خرید کل: ${formatMoney(result.netPurchaseTotal)}\n`;
   text += "\n━━━━━━━━━━━━━━\n📈 سود فروش\n\n";

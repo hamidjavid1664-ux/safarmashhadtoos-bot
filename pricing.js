@@ -219,7 +219,7 @@ function calculateRailTour(data) {
   let loanIneligibleReason = "";
 
   if (paymentType === "loan") {
-    // هزینه بالای ۱۰۰ میلیون فقط وام نارون را نامشمول می‌کند؛ محاسبه تور متوقف نمی‌شود.
+    // نامشمول بودن وام نباید محاسبه کل تور را متوقف کند.
     try {
       loanAmount = getNarvanLoanAmount(finalPrice);
       customerCash = Math.max(0, finalPrice - loanAmount);
@@ -227,6 +227,8 @@ function calculateRailTour(data) {
       if (finalPrice > 100000000) {
         loanEligible = false;
         loanIneligibleReason = "هزینه کل تور بیشتر از ۱۰۰ میلیون تومان است و مشمول وام طرح نارون نمی‌شود.";
+        // مبلغ کل همچنان محاسبه می‌شود؛ در صورت ادامه بدون وام، کل مبلغ نقدی است.
+        customerCash = finalPrice;
       } else {
         throw error;
       }
@@ -315,12 +317,17 @@ function formatRailCalculation(result) {
   if (result.paymentType === "loan") {
     text += "\n━━━━━━━━━━━━━━\n🌳 محاسبات وام طرح نارون\n\n";
     text += `💵 هزینه کل تور: ${formatMoney(result.finalPrice)}\n`;
-    text += `🌳 مبلغ وام طرح نارون: ${formatMoney(result.loanAmount)}\n`;
-    text += `💰 مبلغ پرداختی مشتری: ${formatMoney(result.customerCash)}\n`;
-    const { interest, repaymentTotal, monthlyInstallment } = getNarvanRepayment(result.loanAmount);
-    text += `📈 سود ۴٪ کل دوره: ${formatMoney(interest)}\n`;
-    text += `💳 مجموع بازپرداخت وام: ${formatMoney(repaymentTotal)}\n`;
-    text += `📅 قسط ماهانه تقریبی در ۱۸ ماه: ${formatMoney(monthlyInstallment)}\n`;
+    if (result.loanEligible === false) {
+      text += `⚠️ ${result.loanIneligibleReason || "این هزینه مشمول وام طرح نارون نمی‌شود."}\n`;
+      text += `💵 در صورت ادامه بدون وام، مبلغ کل پرداختی نقدی: ${formatMoney(result.finalPrice)}\n`;
+    } else {
+      text += `🌳 مبلغ وام طرح نارون: ${formatMoney(result.loanAmount)}\n`;
+      text += `💰 مبلغ پرداختی مشتری: ${formatMoney(result.customerCash)}\n`;
+      const { interest, repaymentTotal, monthlyInstallment } = getNarvanRepayment(result.loanAmount);
+      text += `📈 سود ۴٪ کل دوره: ${formatMoney(interest)}\n`;
+      text += `💳 مجموع بازپرداخت وام: ${formatMoney(repaymentTotal)}\n`;
+      text += `📅 قسط ماهانه تقریبی در ۱۸ ماه: ${formatMoney(monthlyInstallment)}\n`;
+    }
   }
 
   return text;
@@ -378,7 +385,7 @@ function calculateManualTour(data) {
   let loanIneligibleReason = "";
 
   if (paymentType === "loan") {
-    // هزینه بالای ۱۰۰ میلیون فقط وام نارون را نامشمول می‌کند؛ محاسبه تور متوقف نمی‌شود.
+    // نامشمول بودن وام نباید محاسبه کل تور را متوقف کند.
     try {
       loanAmount = getNarvanLoanAmount(finalPrice);
       customerCash = Math.max(0, finalPrice - loanAmount);
@@ -386,6 +393,7 @@ function calculateManualTour(data) {
       if (finalPrice > 100000000) {
         loanEligible = false;
         loanIneligibleReason = "هزینه کل تور بیشتر از ۱۰۰ میلیون تومان است و مشمول وام طرح نارون نمی‌شود.";
+        customerCash = finalPrice;
       } else {
         throw error;
       }
@@ -473,18 +481,18 @@ function formatManualCalculation(result) {
   text += `📈 سود کل: ${formatMoney(result.totalProfit)}\n`;
   text += `💰 قیمت نهایی: ${formatMoney(result.finalPrice)}\n`;
   if (result.paymentType === "loan") {
-    text += "\\n━━━━━━━━━━━━━━\\n🌳 محاسبات وام طرح نارون\\n\\n";
-    text += `💵 هزینه کل تور: ${formatMoney(result.finalPrice)}\\n`;
+    text += "\n━━━━━━━━━━━━━━\n🌳 محاسبات وام طرح نارون\n\n";
+    text += `💵 هزینه کل تور: ${formatMoney(result.finalPrice)}\n`;
     if (result.loanEligible === false) {
-      text += "⚠️ هزینه کل تور شما بیشتر از ۱۰۰ میلیون تومان است؛ بنابراین مشمول وام طرح نارون نمی‌شوید.\\n";
-      text += "لطفاً برای ادامه، روش پرداخت نقدی را انتخاب کنید.\\n";
+      text += `⚠️ ${result.loanIneligibleReason || "این هزینه مشمول وام طرح نارون نمی‌شود."}\n`;
+      text += `💵 در صورت ادامه بدون وام، مبلغ کل پرداختی نقدی: ${formatMoney(result.finalPrice)}\n`;
     } else {
-      text += `🌳 مبلغ وام طرح نارون: ${formatMoney(result.loanAmount)}\\n`;
-      text += `💰 مبلغ پرداختی مشتری: ${formatMoney(result.customerCash)}\\n`;
+      text += `🌳 مبلغ وام طرح نارون: ${formatMoney(result.loanAmount)}\n`;
+      text += `💰 مبلغ پرداختی مشتری: ${formatMoney(result.customerCash)}\n`;
       const { interest, repaymentTotal, monthlyInstallment } = getNarvanRepayment(result.loanAmount);
-      text += `📈 سود ۴٪ کل دوره: ${formatMoney(interest)}\\n`;
-      text += `💳 مجموع بازپرداخت وام: ${formatMoney(repaymentTotal)}\\n`;
-      text += `📅 قسط ماهانه تقریبی در ۱۸ ماه: ${formatMoney(monthlyInstallment)}\\n`;
+      text += `📈 سود ۴٪ کل دوره: ${formatMoney(interest)}\n`;
+      text += `💳 مجموع بازپرداخت وام: ${formatMoney(repaymentTotal)}\n`;
+      text += `📅 قسط ماهانه تقریبی در ۱۸ ماه: ${formatMoney(monthlyInstallment)}\n`;
     }
   }
   return text;

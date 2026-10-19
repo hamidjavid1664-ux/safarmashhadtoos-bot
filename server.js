@@ -687,22 +687,17 @@ function diamondPlanText() {
 💚 شهر بهشت؛ سفر هوشمندانه به مشهد مقدس`;
   }
 
-  return `💎 طرح الماس جدید شهر بهشت؛ زیارت، با برنامه‌ریزی هوشمندانه
+  return `💎 طرح الماس شهر بهشت؛ زیارت، با برنامه‌ریزی هوشمندانه
 
-🌹 دلتنگ زیارت امام رضا (ع) هستید، اما افزایش هزینه‌های سفر و شرایط اقتصادی باعث شده برای سفر تصمیم‌گیری سخت‌تر شود؟
+🌹 در طرح الماس، متناسب با گزینه انتخابی، بخشی از هزینه سفر توسط متقاضی و بخش دیگر در قالب وام تأمین می‌شود.
 
-ما در «شهر بهشت» تلاش می‌کنیم مسیر سفر به مشهد مقدس را برای شما آسان‌تر کنیم.
+💠 گزینه‌های سهم هزینه سفر:
+🔹 ۸۰٪ سهم متقاضی و ۲۰٪ سهم طرح
+🔹 ۶۰٪ سهم متقاضی و ۴۰٪ سهم طرح
+🔹 ۷۰٪ سهم متقاضی و ۳۰٪ سهم طرح
+🔹 ۵۰٪ سهم متقاضی و ۵۰٪ سهم طرح
 
-✨ با شرایط جدید طرح الماس، هنوز هم می‌توانید برای زیارت برنامه‌ریزی کنید!
-
-💠 شرایط طرح الماس جدید:
-🔹 ۷۰٪ هزینه سفر با شما
-🔹 ۳۰٪ هزینه سفر در قالب وام طرح الماس
-🔹 بازپرداخت وام در ۱۸ ماه
-🔹 سود سالانه ۳٪
-
-📌 نحوه پرداخت:
-شما ۷۰ درصد هزینه سفر را پرداخت می‌کنید و ۳۰ درصد باقی‌مانده در قالب وام طرح الماس تأمین می‌شود.
+📌 گزینه قابل استفاده و مبلغ نهایی، هنگام محاسبه و با توجه به شرایط طرح مشخص می‌شود.
 
 📲 مراحل اقدام برای وام:
 ۱️⃣ نصب کیوبانک مهر
@@ -722,32 +717,20 @@ function diamondPlanText() {
 }
 
 function sendDiamondPlan(chatId) {
-  return sendMessage(
-    chatId,
-    diamondPlanText(),
-    {
-      inline_keyboard: [
-        [
-          {
-            text: "📲 نصب کیوبانک مهر",
-            url: "https://qbank24.ir/downloads"
-          }
-        ],
-        [
-          {
-            text: "🤖 دانلود کیوبانک برای اندروید",
-            url: "https://mehr-apps.hot.ir-central1.arvanstorage.ir/Qbank_8.0.5.apk?versionId="
-          }
-        ],
-        [
-          {
-            text: "🔙 بازگشت",
-            callback_data: "DIAMOND_BACK"
-          }
-        ]
-      ]
-    }
-  );
+  const keyboard = [];
+  // کلیدهای نصب کیوبانک فقط وقتی طرح الماس فعال است نمایش داده شوند.
+  if (diamondEnabledCache) {
+    keyboard.push([
+      { text: "📲 نصب کیوبانک مهر", url: "https://qbank24.ir/downloads" }
+    ]);
+    keyboard.push([
+      { text: "🤖 دانلود کیوبانک برای اندروید", url: "https://mehr-apps.hot.ir-central1.arvanstorage.ir/Qbank_8.0.5.apk?versionId=" }
+    ]);
+  }
+  keyboard.push([
+    { text: "🔙 بازگشت", callback_data: "DIAMOND_BACK" }
+  ]);
+  return sendMessage(chatId, diamondPlanText(), { inline_keyboard: keyboard });
 }
 
 /*
@@ -3776,16 +3759,14 @@ async function handleMessage(
   }
 
   if (text === "🌳 طرح نارون") {
-    await sendMessage(
-      chatId,
-      narvanPlanText(),
-      {
-        inline_keyboard: [
-          [{ text: "🚌 مشاهده تورها و محاسبه هزینه", callback_data: "NARVAN_TOURS" }],
-          [{ text: "🔙 بازگشت به منوی اصلی", callback_data: "NARVAN_BACK" }]
-        ]
-      }
-    );
+    const narvanKeyboard = [];
+    if (narvanEnabledCache) {
+      narvanKeyboard.push([{ text: "📲 نصب کیوبانک مهر", url: "https://qbank24.ir/downloads" }]);
+      narvanKeyboard.push([{ text: "🤖 دانلود کیوبانک برای اندروید", url: "https://mehr-apps.hot.ir-central1.arvanstorage.ir/Qbank_8.0.5.apk?versionId=" }]);
+    }
+    narvanKeyboard.push([{ text: "🚌 مشاهده تورها و محاسبه هزینه", callback_data: "NARVAN_TOURS" }]);
+    narvanKeyboard.push([{ text: "🔙 بازگشت به منوی اصلی", callback_data: "NARVAN_BACK" }]);
+    await sendMessage(chatId, narvanPlanText(), { inline_keyboard: narvanKeyboard });
     return;
   }
 

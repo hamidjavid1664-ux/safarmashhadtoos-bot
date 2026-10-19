@@ -48,8 +48,26 @@ function isAdmin(chatId) {
 
 // وضعیت فعال/غیرفعال بودن درخواست‌های جدید وام طرح نارون
 let narvanEnabledCache = true;
+let diamondEnabledCache = false;
 let narvanOverLimitEnabledCache = false;
 let trainChildTicketPercentCache = 65;
+
+async function setDiamondEnabled(enabled) {
+  diamondEnabledCache = Boolean(enabled);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS narvan_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(
+    `INSERT INTO narvan_settings (setting_key, setting_value, updated_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = NOW()`,
+    ["diamond_loan_enabled", enabled ? "true" : "false"]
+  );
+}
 
 async function setNarvanEnabled(enabled) {
   narvanEnabledCache = Boolean(enabled);
@@ -272,6 +290,9 @@ async function initDB() {
     ["narvan_loan_enabled"]
   );
   narvanEnabledCache = narvanSetting.rows[0]?.setting_value !== "false";
+  await pool.query(`INSERT INTO narvan_settings (setting_key, setting_value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (setting_key) DO NOTHING`, ["diamond_loan_enabled", "false"]);
+  const diamondSetting = await pool.query("SELECT setting_value FROM narvan_settings WHERE setting_key=$1", ["diamond_loan_enabled"]);
+  diamondEnabledCache = diamondSetting.rows[0]?.setting_value === "true";
   await pool.query(`INSERT INTO narvan_settings (setting_key, setting_value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (setting_key) DO NOTHING`, ["narvan_over_100m_enabled", "false"]);
   const overLimitSetting = await pool.query("SELECT setting_value FROM narvan_settings WHERE setting_key=$1", ["narvan_over_100m_enabled"]);
   narvanOverLimitEnabledCache = overLimitSetting.rows[0]?.setting_value === "true";
@@ -609,6 +630,21 @@ function backKeyboard() {
  */
 
 function narvanPlanText() {
+  if (!narvanEnabledCache) {
+    return `🌳 طرح نارون شهر بهشت
+
+⏸️ طرح وام نارون فعلاً غیرفعال است.
+
+🙏 ان‌شاءالله در آینده‌ای نه‌چندان دور، پس از فراهم شدن شرایط تأمین وام، امکان استفاده دوباره از طرح فراهم خواهد شد.
+
+💵 در حال حاضر، سفرهای مشهد فقط به‌صورت نقدی قابل محاسبه و ثبت هستند.
+
+📲 برای مشاهده تورها و محاسبه هزینه سفر نقدی، از گزینه زیر استفاده کنید.
+☎️ پشتیبانی: ${CONFIG.CONTACT.phone}
+
+💚 شهر بهشت؛ سفر هوشمندانه به مشهد مقدس`;
+  }
+
   return `🌳 طرح نارون شهر بهشت
 
 🌹 طرح نارون برای کمک به خانواده‌هایی در نظر گرفته شده است که قصد سفر زیارتی به مشهد مقدس دارند.
@@ -637,6 +673,20 @@ function narvanPlanText() {
  */
 
 function diamondPlanText() {
+  if (!diamondEnabledCache) {
+    return `💎 طرح الماس شهر بهشت
+
+⏸️ طرح وام الماس فعلاً غیرفعال است.
+
+🙏 ان‌شاءالله در آینده‌ای نه‌چندان دور، پس از فراهم شدن شرایط تأمین وام، امکان استفاده دوباره از طرح فراهم خواهد شد.
+
+💵 در حال حاضر، سفرهای مشهد فقط به‌صورت نقدی قابل محاسبه و ثبت هستند.
+
+☎️ پشتیبانی: ${CONFIG.CONTACT.phone}
+
+💚 شهر بهشت؛ سفر هوشمندانه به مشهد مقدس`;
+  }
+
   return `💎 طرح الماس جدید شهر بهشت؛ زیارت، با برنامه‌ریزی هوشمندانه
 
 🌹 دلتنگ زیارت امام رضا (ع) هستید، اما افزایش هزینه‌های سفر و شرایط اقتصادی باعث شده برای سفر تصمیم‌گیری سخت‌تر شود؟
@@ -2584,6 +2634,12 @@ function managerCalcMenu(
   ]);
   rows.push([
     {
+      text: diamondEnabledCache ? "💎 وام الماس: فعال ✅" : "💎 وام الماس: غیرفعال ⛔",
+      callback_data: "ADMIN_DIAMOND_STATUS"
+    }
+  ]);
+  rows.push([
+    {
       text: narvanOverLimitEnabledCache ? "🔓 وام بالای ۱۰۰ میلیون: مجاز ✅" : "🔒 وام بالای ۱۰۰ میلیون: غیرمجاز ⛔",
       callback_data: "ADMIN_NARVAN_OVER_LIMIT"
     }
@@ -3714,15 +3770,8 @@ async function handleMessage(
   /*
    * طرح الماس
    */
-  if (
-    text ===
-    "💎 طرح الماس شهر بهشت"
-  ) {
-    await sendMessage(
-      chatId,
-      "💎 طرح الماس شهر بهشت فعلاً غیرفعال است و تا اطلاع ثانوی امکان اختصاص وام جدید در این طرح وجود ندارد.\n\n🌳 برای استفاده از شرایط جدید، گزینه «طرح نارون» را انتخاب کنید.",
-      mainKeyboard()
-    );
+  if (text === "💎 طرح الماس شهر بهشت") {
+    await sendDiamondPlan(chatId);
     return;
   }
 
@@ -4094,6 +4143,32 @@ async function handleCallback(
     cb.id
   );
 
+  if (["ADMIN_DIAMOND_STATUS", "ADMIN_DIAMOND_ENABLE", "ADMIN_DIAMOND_DISABLE"].includes(data)) {
+    if (!isAdmin(chatId)) {
+      await sendMessage(chatId, "⛔ این بخش فقط برای مدیر ربات فعال است.");
+      return;
+    }
+    if (data === "ADMIN_DIAMOND_ENABLE") {
+      await setDiamondEnabled(true);
+      await sendMessage(chatId, "✅ طرح الماس فعال شد. توضیحات اصلی طرح برای مشتریان نمایش داده می‌شود.", managerCalcMenu());
+      return;
+    }
+    if (data === "ADMIN_DIAMOND_DISABLE") {
+      await setDiamondEnabled(false);
+      await sendMessage(chatId, "⛔ طرح الماس غیرفعال شد. توضیح غیرفعال بودن طرح و پرداخت نقدی برای مشتریان نمایش داده می‌شود.", managerCalcMenu());
+      return;
+    }
+    await sendMessage(chatId,
+      `تنظیم وضعیت وام طرح الماس\n\nوضعیت فعلی: ${diamondEnabledCache ? "فعال ✅" : "غیرفعال ⛔"}\n\nوقتی طرح غیرفعال باشد، متن اطلاع‌رسانی و پرداخت نقدی نمایش داده می‌شود؛ با فعال‌سازی، توضیحات اصلی طرح نمایش داده خواهد شد.`,
+      { inline_keyboard: [
+        [{ text: "✅ فعال کردن طرح الماس", callback_data: "ADMIN_DIAMOND_ENABLE" }],
+        [{ text: "⛔ غیرفعال کردن طرح الماس", callback_data: "ADMIN_DIAMOND_DISABLE" }],
+        [{ text: "🔙 بازگشت به محاسبات مدیر", callback_data: "ADMIN_CALC_EXIT" }]
+      ] }
+    );
+    return;
+  }
+
   if (["ADMIN_NARVAN_STATUS", "ADMIN_NARVAN_ENABLE", "ADMIN_NARVAN_DISABLE", "ADMIN_NARVAN_OVER_LIMIT", "ADMIN_NARVAN_OVER_LIMIT_ENABLE", "ADMIN_NARVAN_OVER_LIMIT_DISABLE"].includes(data)) {
     if (!isAdmin(chatId)) {
       await sendMessage(chatId, "⛔ این بخش فقط برای مدیر ربات فعال است.");
@@ -4218,7 +4293,9 @@ async function handleCallback(
 
   if (data === "NARVAN_TOURS") {
     await saveSession(chatId, "TOUR_MENU", {});
-    await sendMessage(chatId, "🚌 تورهای مشهد\n\nنوع سفر را انتخاب کنید؛ در مرحله پرداخت، گزینه «وام طرح نارون» را بزنید:", tourMenu());
+    await sendMessage(chatId, narvanEnabledCache
+      ? "🚌 تورهای مشهد\n\nنوع سفر را انتخاب کنید؛ در صورت فعال بودن وام، گزینه طرح نارون در مرحله پرداخت نمایش داده می‌شود."
+      : "🚌 تورهای مشهد\n\n⏸️ وام طرح نارون فعلاً غیرفعال است. در حال حاضر سفرها فقط به‌صورت نقدی قابل محاسبه و ثبت هستند.", tourMenu());
     return;
   }
 

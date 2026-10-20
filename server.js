@@ -2759,7 +2759,7 @@ async function railText(
   if (s.state === "RAIL_CHILD_3_5") {
     if (v < 0) { await sendMessage(chatId, "❌ تعداد کودک صحیح نیست."); return true; }
     await saveSession(chatId, "RAIL_CHILD_5_12", { ...d, child3to5: v });
-    await sendMessage(chatId, "👦 تعداد کودک ۵ تا ۱۲ سال را وارد کنید (اگر ندارید ۰):"); return true;
+    await sendMessage(chatId, "👦 تعداد کودک ۵ تا کمتر از ۱۲ سال را وارد کنید (اگر ندارید ۰):"); return true;
   }
   if (s.state === "RAIL_CHILD_5_12") {
     if (v < 0) { await sendMessage(chatId, "❌ تعداد کودک صحیح نیست."); return true; }
@@ -2989,7 +2989,7 @@ async function manualText(
       await sendMessage(chatId, "👶 مبلغ بلیت رفت هر نوزاد زیر ۲ سال را وارد کنید:");
     } else if (Number(d.children || 0) > 0) {
       await saveSession(chatId, "MAN_AIR_TICKET_CHILD_OUT", {...next, ticketInfantOutbound: 0, ticketInfantReturn: 0});
-      await sendMessage(chatId, "👧 مبلغ بلیت رفت هر کودک ۲ تا ۱۲ سال را وارد کنید:");
+      await sendMessage(chatId, "👧 مبلغ بلیت رفت هر کودک ۲ تا کمتر از ۱۲ سال را وارد کنید:");
     } else {
       await saveSession(chatId, "MAN_AIR_PAYMENT", {...next, ticketChildOutbound: 0, ticketChildReturn: 0, ticketInfantOutbound: 0, ticketInfantReturn: 0});
       await sendMessage(chatId, "🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:");
@@ -3007,7 +3007,7 @@ async function manualText(
     const next = { ...d, ticketInfantReturn: v };
     if (Number(d.children || 0) > 0) {
       await saveSession(chatId, "MAN_AIR_TICKET_CHILD_OUT", next);
-      await sendMessage(chatId, "👧 مبلغ بلیت رفت هر کودک ۲ تا ۱۲ سال را وارد کنید:");
+      await sendMessage(chatId, "👧 مبلغ بلیت رفت هر کودک ۲ تا کمتر از ۱۲ سال را وارد کنید:");
     } else {
       await saveSession(chatId, "MAN_AIR_PAYMENT", { ...next, ticketChildOutbound: 0, ticketChildReturn: 0 });
       await sendMessage(chatId, "🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:");
@@ -3021,7 +3021,7 @@ async function manualText(
       return true;
     }
     await saveSession(chatId, "MAN_AIR_TICKET_CHILD_BACK", {...d, ticketChildOutbound: v});
-    await sendMessage(chatId, "👧 مبلغ بلیت برگشت هر کودک ۲ تا ۱۲ سال را وارد کنید:");
+    await sendMessage(chatId, "👧 مبلغ بلیت برگشت هر کودک ۲ تا کمتر از ۱۲ سال را وارد کنید:");
     return true;
   }
 
@@ -3107,7 +3107,7 @@ async function manualText(
   if (d.type === "AIR" && s.state === "MAN_CHILD_3_5") {
     if (v < 0) { await sendMessage(chatId, "❌ تعداد کودک صحیح نیست."); return true; }
     await saveSession(chatId, "MAN_CHILD_5_12", { ...d, child3to5: v });
-    await sendMessage(chatId, "👦 تعداد کودک ۵ تا ۱۲ سال را وارد کنید:"); return true;
+    await sendMessage(chatId, "👦 تعداد کودک ۵ تا کمتر از ۱۲ سال را وارد کنید:"); return true;
   }
   if (d.type === "AIR" && s.state === "MAN_CHILD_5_12") {
     if (v < 0) { await sendMessage(chatId, "❌ تعداد کودک صحیح نیست."); return true; }
@@ -5349,7 +5349,7 @@ ${e.message}`
    * =======================================================
    * محاسبه اختصاصی تور اتوبوسی
    * بلیت رفت و برگشت هر صندلی = ۴٬۰۰۰٬۰۰۰ تومان
-   * کودک ۳ تا ۵ سال نیز صندلی کامل دارد.
+   * کودک ۳ تا کمتر از ۵ سال نیز صندلی کامل دارد.
    * =======================================================
    */
 
@@ -5364,7 +5364,7 @@ ${e.message}`
 
     await sendMessage(
       chatId,
-      "🚌 محاسبه تور اتوبوسی\n\n🎫 بلیت رفت و برگشت هر صندلی: ۴٬۰۰۰٬۰۰۰ تومان\n👶 کودک ۳ تا ۵ سال: بلیت کامل\n\n👨 تعداد بزرگسال را وارد کنید:"
+      "🚌 محاسبه تور اتوبوسی\n\n🎫 بلیت رفت و برگشت هر صندلی: ۴٬۰۰۰٬۰۰۰ تومان\n👶 کودک ۳ تا کمتر از ۵ سال: بلیت کامل\n\n👨 تعداد بزرگسال را وارد کنید:"
     );
     return;
   }

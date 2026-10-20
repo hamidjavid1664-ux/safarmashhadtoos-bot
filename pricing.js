@@ -15,7 +15,9 @@ const SETTINGS = {
   AIR_CASH_PROFIT: 3500000,
   AIR_LOAN_PROFIT: 6000000,
   LOAN_ROUND_STEP: 5000000,
-  NARVAN_ROUND_STEP: 500000
+  NARVAN_ROUND_STEP: 500000,
+  NARVAN_TOUR_PROFIT_PER_PERSON: 5000000,
+  NARVAN_HOTEL_PROFIT_PER_PERSON_PER_NIGHT: 600000
 };
 
 const RAIL_TRAINS = {
@@ -102,9 +104,9 @@ function getNarvanLoanAmount(total, allowOverLimit = false) {
   total = toNumber(total);
   if (total <= 0) throw new Error("هزینه کل تور معتبر نیست.");
   if (total <= 50000000) return 20000000;
-  if (total <= 80000000) return 25000000;
-  if (total <= 100000000) return 30000000;
-  if (allowOverLimit) return 30000000;
+  if (total <= 70000000) return 30000000;
+  if (total <= 100000000) return 40000000;
+  if (allowOverLimit) return 40000000;
   throw new Error("هزینه کل تور بیشتر از ۱۰۰ میلیون تومان است و مشمول وام طرح نارون نمی‌شود.");
 }
 function getNarvanRepayment(loanAmount) {
@@ -194,7 +196,12 @@ function calculateRailTour(data) {
   const netPurchaseTotal = adultsTotal + childrenTotal;
   const profitPerPerson = paymentType === "loan" ? SETTINGS.RAIL_LOAN_PROFIT : SETTINGS.RAIL_CASH_PROFIT;
   const totalProfit = profitPerPerson * totalPassengers;
-  const finalPrice = roundCustomerAmount(netPurchaseTotal + totalProfit);
+  // سود هتل در طرح نارون جدا از سود تور و بر اساس نفر-شبِ مشمول هزینه هتل است.
+  const hotelPayingPersonEquivalents = adults + child5to12 + (child3to5 * 0.5);
+  const hotelProfit = paymentType === "loan"
+    ? hotelPayingPersonEquivalents * nights * SETTINGS.NARVAN_HOTEL_PROFIT_PER_PERSON_PER_NIGHT
+    : 0;
+  const finalPrice = roundCustomerAmount(netPurchaseTotal + totalProfit + hotelProfit);
   let customerCash = 0, loanAmount = 0, loanEligible = true, loanIneligibleReason = "";
   if (paymentType === "loan") {
     try { loanAmount = getNarvanLoanAmount(finalPrice, Boolean(data.allowNarvanOverLimit)); customerCash = Math.max(0, finalPrice - loanAmount); }
@@ -203,7 +210,7 @@ function calculateRailTour(data) {
   return { route, trainKey, routeInfo: train, adults, infants, child2to3, child3to5, child5to12, children, totalPassengers, nights, hotelPrice, childTicketPercent, privateCompartment, compartmentPlan, privateCompartmentFee,
     ticket: { oneWay: train.ticket, issueFeeOneWay: issueOneWay, adultRoundTrip, childRoundTrip, adultTrainNet, childTrainNet },
     hotel: { adultHotel, childHotel: childHotelHalf, freeHotelChildren, halfHotelChildren, fullHotelChildren, childHotelCost, hotelCost: adults * adultHotel + childHotelCost },
-    adultsTotal, childrenTotal, netPurchaseTotal, profitPerPerson, totalProfit, finalPrice, paymentType, customerCash, loanAmount, loanEligible, loanIneligibleReason, allowNarvanOverLimit: Boolean(data.allowNarvanOverLimit),
+    adultsTotal, childrenTotal, netPurchaseTotal, profitPerPerson, totalProfit, hotelProfit, hotelPayingPersonEquivalents, finalPrice, paymentType, customerCash, loanAmount, loanEligible, loanIneligibleReason, allowNarvanOverLimit: Boolean(data.allowNarvanOverLimit),
     cashPercentActual: finalPrice ? (customerCash / finalPrice) * 100 : 0, loanPercentActual: finalPrice ? (loanAmount / finalPrice) * 100 : 0 };
 }
 
@@ -317,7 +324,12 @@ function calculateManualTour(data) {
     else if (type === "RAIL") profitPerPerson = paymentType === "loan" ? SETTINGS.RAIL_LOAN_PROFIT : SETTINGS.RAIL_CASH_PROFIT;
   }
   const totalProfit = profitPerPerson * totalPassengers;
-  const finalPrice = roundCustomerAmount(netPurchaseTotal + totalProfit);
+  // سود هتل نارون: ۶۰۰ هزار تومان برای هر نفرِ مشمول هزینه هتل در هر شب.
+  const hotelPayingPersonEquivalents = adults + fullChildren + (legacyHalfChildren * 0.5);
+  const hotelProfit = paymentType === "loan"
+    ? hotelPayingPersonEquivalents * nights * SETTINGS.NARVAN_HOTEL_PROFIT_PER_PERSON_PER_NIGHT
+    : 0;
+  const finalPrice = roundCustomerAmount(netPurchaseTotal + totalProfit + hotelProfit);
   let customerCash = 0, loanAmount = 0, loanEligible = true, loanIneligibleReason = "";
   if (paymentType === "loan") {
     try { loanAmount = getNarvanLoanAmount(finalPrice, Boolean(data.allowNarvanOverLimit)); customerCash = Math.max(0, finalPrice - loanAmount); }
@@ -326,7 +338,7 @@ function calculateManualTour(data) {
   return { type, adults, infants, child2to3, child3to5: legacyHalfChildren, child5to12: fullChildren, freeHotelChildren: freeChildren, children, nights, totalPassengers,
     ticketAdult, ticketAdultOutbound, ticketAdultReturn, childTicket, ticketChildOutbound, ticketChildReturn, infantTicket, ticketInfantOutbound, ticketInfantReturn,
     adultTicketTotal, childTicketTotal, infantTicketTotal, childPercent, hotelAdult, childHotel, busRental, ticketTotal, hotelTotal, netPurchaseTotal,
-    profitPerPerson, totalProfit, finalPrice, paymentType, loanAmount, customerCash, loanEligible, loanIneligibleReason, allowNarvanOverLimit: Boolean(data.allowNarvanOverLimit) };
+    profitPerPerson, totalProfit, hotelProfit, hotelPayingPersonEquivalents, finalPrice, paymentType, loanAmount, customerCash, loanEligible, loanIneligibleReason, allowNarvanOverLimit: Boolean(data.allowNarvanOverLimit) };
 }
 
 function formatManualCalculation(result) {
@@ -389,7 +401,8 @@ function formatManualCalculation(result) {
   text += `\n💰 نت خرید کل: ${formatMoney(result.netPurchaseTotal)}\n`;
   text += "\n━━━━━━━━━━━━━━\n📈 سود فروش\n\n";
   text += `💵 سود هر نفر: ${formatMoney(result.profitPerPerson)}\n`;
-  text += `📈 سود کل: ${formatMoney(result.totalProfit)}\n`;
+  text += `📈 سود کل تور: ${formatMoney(result.totalProfit)}\n`;
+  if (result.hotelProfit > 0) text += `🏨 سود هتل (${formatNumber(result.hotelPayingPersonEquivalents)} نفرِ مشمول × ${formatNumber(result.nights)} شب): ${formatMoney(result.hotelProfit)}\n`;
   text += `💰 قیمت نهایی: ${formatMoney(result.finalPrice)}\n`;
   if (result.paymentType === "loan") {
     text += "\n━━━━━━━━━━━━━━\n🌳 محاسبات وام طرح نارون\n\n";

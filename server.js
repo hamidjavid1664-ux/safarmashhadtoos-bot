@@ -299,7 +299,7 @@ async function initDB() {
   await pool.query(`INSERT INTO narvan_settings (setting_key, setting_value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (setting_key) DO NOTHING`, ["train_child_ticket_percent", "65"]);
   const trainPercentSetting = await pool.query("SELECT setting_value FROM narvan_settings WHERE setting_key=$1", ["train_child_ticket_percent"]);
   const parsedTrainPercent = Number(trainPercentSetting.rows[0]?.setting_value);
-  trainChildTicketPercentCache = [60, 65, 70].includes(parsedTrainPercent) ? parsedTrainPercent : 65;
+  trainChildTicketPercentCache = Number.isFinite(parsedTrainPercent) && parsedTrainPercent >= 1 && parsedTrainPercent <= 100 ? parsedTrainPercent : 65;
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions(
@@ -651,8 +651,8 @@ function narvanPlanText() {
 
 💠 شرایط دریافت وام طرح نارون:
 🔹 هزینه کل تور تا ۵۰ میلیون تومان: ۲۰ میلیون تومان وام
-🔹 هزینه کل تور بیشتر از ۵۰ تا ۸۰ میلیون تومان: ۲۵ میلیون تومان وام
-🔹 هزینه کل تور بیشتر از ۸۰ تا ۱۰۰ میلیون تومان: ۳۰ میلیون تومان وام
+🔹 هزینه کل تور بیشتر از ۵۰ تا ۷۰ میلیون تومان: ۳۰ میلیون تومان وام
+🔹 هزینه کل تور بیشتر از ۷۰ تا ۱۰۰ میلیون تومان: ۴۰ میلیون تومان وام
 🔹 هزینه کل تور بیشتر از ۱۰۰ میلیون تومان: مشمول شرایط فعلی طرح نیست
 
 📅 مدت بازپرداخت: ۱۸ ماه
@@ -692,10 +692,13 @@ function diamondPlanText() {
 🌹 در طرح الماس، متناسب با گزینه انتخابی، بخشی از هزینه سفر توسط متقاضی و بخش دیگر در قالب وام تأمین می‌شود.
 
 💠 گزینه‌های سهم هزینه سفر:
-🔹 ۸۰٪ سهم متقاضی و ۲۰٪ سهم طرح
-🔹 ۶۰٪ سهم متقاضی و ۴۰٪ سهم طرح
-🔹 ۷۰٪ سهم متقاضی و ۳۰٪ سهم طرح
-🔹 ۵۰٪ سهم متقاضی و ۵۰٪ سهم طرح
+🔹 ۸۰٪ وام، ۲۰٪ پرداخت نقدی متقاضی
+🔹 ۶۰٪ وام، ۴۰٪ پرداخت نقدی متقاضی
+🔹 ۷۰٪ وام، ۳۰٪ پرداخت نقدی متقاضی
+🔹 ۵۰٪ وام، ۵۰٪ پرداخت نقدی متقاضی
+
+📅 بازپرداخت: ۱۲ ماهه
+📊 سود: ۳٪
 
 📌 گزینه قابل استفاده و مبلغ نهایی، هنگام محاسبه و با توجه به شرایط طرح مشخص می‌شود.
 
@@ -726,6 +729,9 @@ function sendDiamondPlan(chatId) {
     keyboard.push([
       { text: "🤖 دانلود کیوبانک برای اندروید", url: "https://mehr-apps.hot.ir-central1.arvanstorage.ir/Qbank_8.0.5.apk?versionId=" }
     ]);
+  } else {
+    keyboard.push([{ text: "🚌 مشاهده تورها", callback_data: "NARVAN_TOURS" }]);
+    keyboard.push([{ text: "💵 مشاهده تور و پرداخت نقدی", callback_data: "NARVAN_TOURS" }]);
   }
   keyboard.push([
     { text: "🔙 بازگشت", callback_data: "DIAMOND_BACK" }
@@ -1078,15 +1084,10 @@ async function askChildren(
   chatId,
   d
 ) {
-  await saveSession(
-    chatId,
-    "TOUR_CHILDREN",
-    d
-  );
-
+  await saveSession(chatId, "TOUR_INFANTS", d);
   await sendMessage(
     chatId,
-    "👶 تعداد کودک ۳ تا ۵ سال را وارد کنید.\nاگر کودک ندارید ۰ بفرستید.",
+    "👶 تعداد نوزاد ۱۰ روزه تا کمتر از ۲ سال را وارد کنید.\nاگر ندارید ۰ بفرستید.",
     backKeyboard()
   );
 }
@@ -1207,9 +1208,10 @@ async function showConfirm(
 👨 بزرگسال: ${
     d.adults
   } نفر
-👶 کودک ۳ تا ۵ سال: ${
-    d.children
-  } نفر
+👶 نوزاد ۱۰ روزه تا زیر ۲ سال: ${d.infants || 0} نفر
+👧 کودک ۲ تا زیر ۳ سال: ${d.child2to3 || 0} نفر
+👧 کودک ۳ تا زیر ۵ سال: ${d.child3to5 || 0} نفر
+👦 کودک ۵ تا زیر ۱۲ سال: ${d.child5to12 || 0} نفر
 💳 پرداخت: ${
     d.paymentType === "loan"
       ? "🌳 وام طرح نارون"
@@ -1374,30 +1376,32 @@ async function handleTourText(
     return true;
   }
 
-  if (s.state === "TOUR_CHILDREN") {
-    const n = Number(
-      en(text).replace(/\D/g, "")
-    );
-
-    if (
-      !Number.isInteger(n) ||
-      n < 0
-    ) {
-      await sendMessage(
-        chatId,
-        "❌ تعداد کودک صحیح نیست."
-      );
+  if (["TOUR_INFANTS", "TOUR_CHILD_2_3", "TOUR_CHILD_3_5", "TOUR_CHILD_5_12"].includes(s.state)) {
+    const n = Number(en(text).replace(/\D/g, ""));
+    if (!Number.isInteger(n) || n < 0) {
+      await sendMessage(chatId, "❌ تعداد مسافر صحیح نیست؛ یک عدد صفر یا بیشتر وارد کنید.");
       return true;
     }
-
-    await askPayment(
-      chatId,
-      {
-        ...d,
-        children: n
-      }
-    );
-
+    if (s.state === "TOUR_INFANTS") {
+      await saveSession(chatId, "TOUR_CHILD_2_3", { ...d, infants: n });
+      await sendMessage(chatId, "👧 تعداد کودک ۲ تا کمتر از ۳ سال را وارد کنید؛ اگر ندارید ۰ بفرستید.", backKeyboard());
+      return true;
+    }
+    if (s.state === "TOUR_CHILD_2_3") {
+      await saveSession(chatId, "TOUR_CHILD_3_5", { ...d, child2to3: n });
+      await sendMessage(chatId, "👧 تعداد کودک ۳ تا کمتر از ۵ سال را وارد کنید؛ اگر ندارید ۰ بفرستید.", backKeyboard());
+      return true;
+    }
+    if (s.state === "TOUR_CHILD_3_5") {
+      await saveSession(chatId, "TOUR_CHILD_5_12", { ...d, child3to5: n });
+      await sendMessage(chatId, "👦 تعداد کودک ۵ تا کمتر از ۱۲ سال را وارد کنید؛ اگر ندارید ۰ بفرستید.", backKeyboard());
+      return true;
+    }
+    await askPayment(chatId, {
+      ...d,
+      child5to12: n,
+      children: Number(d.child2to3 || 0) + Number(d.child3to5 || 0) + n
+    });
     return true;
   }
 
@@ -1581,9 +1585,10 @@ async function submitRequest(chatId) {
 👨 بزرگسال: ${
       d.adults
     }
-👶 کودک: ${
-      d.children
-    }
+👶 نوزاد ۱۰ روزه تا زیر ۲ سال: ${d.infants || 0}
+👧 کودک ۲ تا زیر ۳ سال: ${d.child2to3 || 0}
+👧 کودک ۳ تا زیر ۵ سال: ${d.child3to5 || 0}
+👦 کودک ۵ تا زیر ۱۲ سال: ${d.child5to12 || 0}
 💳 پرداخت: ${
       d.paymentType === "loan"
         ? "🌳 وام طرح نارون"
@@ -2832,13 +2837,29 @@ async function railText(
       return true;
     }
 
-    await saveSession(chatId, "RAIL_CHILD_PERCENT_SELECT", { ...d, hotelPricePerPersonPerNight: v, childTicketPercent: trainChildTicketPercentCache });
-    await sendMessage(chatId, `🎫 درصد بلیت کودک قطار را انتخاب کنید. مقدار فعلی: ${trainChildTicketPercentCache}٪
-این تنظیم برای محاسبات بعدی هم ذخیره می‌شود:`, { inline_keyboard: [
-      [{ text: "۶۰٪", callback_data: "TRAIN_CHILD_PERCENT_60" }, { text: "۶۵٪", callback_data: "TRAIN_CHILD_PERCENT_65" }, { text: "۷۰٪", callback_data: "TRAIN_CHILD_PERCENT_70" }],
+    await saveSession(chatId, "RAIL_CHILD_PERCENT_INPUT", { ...d, hotelPricePerPersonPerNight: v, childTicketPercent: trainChildTicketPercentCache });
+    await sendMessage(chatId, `🎫 درصد بلیت خردسال قطار را وارد کنید.
+درصد فعلی: ${trainChildTicketPercentCache}٪
+
+یک عدد بین ۱ تا ۱۰۰ وارد کنید؛ این مقدار برای محاسبات بعدی هم ذخیره می‌شود.`);
+
+    return true;
+  }
+
+  if (s.state === "RAIL_CHILD_PERCENT_INPUT") {
+    if (v < 1 || v > 100) {
+      await sendMessage(chatId, "❌ درصد باید عددی بین ۱ تا ۱۰۰ باشد. دوباره وارد کنید:");
+      return true;
+    }
+    trainChildTicketPercentCache = v;
+    await pool.query(`INSERT INTO narvan_settings (setting_key, setting_value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (setting_key) DO UPDATE SET setting_value=EXCLUDED.setting_value, updated_at=NOW()`, ["train_child_ticket_percent", String(v)]);
+    const next = { ...d, childTicketPercent: v };
+    await saveSession(chatId, "RAIL_PAYMENT", next);
+    await sendMessage(chatId, `✅ درصد بلیت خردسال قطار روی ${v}٪ ذخیره شد.
+💳 نوع محاسبه را انتخاب کنید:`, { inline_keyboard: [
+      [{ text: "💵 نقدی", callback_data: "RAIL_PAYMENT_CASH" }, { text: "🌳 وام طرح نارون", callback_data: "RAIL_PAYMENT_LOAN" }],
       [{ text: "🔙 خروج", callback_data: "ADMIN_CALC_EXIT" }]
     ] });
-
     return true;
   }
 
@@ -3024,7 +3045,7 @@ async function manualText(
     if (d.requestCode) {
       if (d.paymentType === "loan") {
         await saveSession(chatId, "MAN_AIR_LOAN_PROFIT", nextData);
-        await sendMessage(chatId, "💎 سود هر نفر برای محاسبه طرح نارون را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:");
+        await sendMessage(chatId, "💎 سود طرح نارون برای هر نفر ۵٬۰۰۰٬۰۰۰ تومان است. لطفاً عدد ۵۰۰۰۰۰۰ را وارد کنید:");
       } else {
         await finishAirCalc(chatId, nextData, "cash", 3500000);
       }
@@ -3042,8 +3063,8 @@ async function manualText(
   }
 
   if (d.type === "AIR" && s.state === "MAN_AIR_LOAN_PROFIT") {
-    if (v < 5000000 || v > 6000000) {
-      await sendMessage(chatId, "❌ سود محاسبه طرح نارون باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد.");
+    if (v !== 5000000) {
+      await sendMessage(chatId, "❌ سود طرح نارون ثابت است: ۵٬۰۰۰٬۰۰۰ تومان برای هر نفر. همین عدد را وارد کنید.");
       return true;
     }
     await finishAirCalc(chatId, d, "loan", v);
@@ -3185,7 +3206,7 @@ async function manualText(
         await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", nextData);
         await sendMessage(
           chatId,
-          "💎 سود هر نفر برای محاسبه طرح نارون را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
+          "💎 سود طرح نارون برای هر نفر ۵٬۰۰۰٬۰۰۰ تومان است. لطفاً عدد ۵۰۰۰۰۰۰ را وارد کنید:"
         );
       } else {
         await saveSession(chatId, "MAN_BUS_PROFIT", nextData);
@@ -3256,8 +3277,8 @@ async function manualText(
 
   /* محاسبه اتوبوسی: سود طرح نارون */
   if (d.type === "BUS" && s.state === "MAN_BUS_LOAN_PROFIT") {
-    if (v < 5000000 || v > 6000000) {
-      await sendMessage(chatId, "❌ سود محاسبه طرح نارون باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد.");
+    if (v !== 5000000) {
+      await sendMessage(chatId, "❌ سود طرح نارون ثابت است: ۵٬۰۰۰٬۰۰۰ تومان برای هر نفر. همین عدد را وارد کنید.");
       return true;
     }
 
@@ -5169,7 +5190,7 @@ ${e.message}`
       await saveSession(chatId, "MAN_BUS_LOAN_PROFIT", d);
       await sendMessage(
         chatId,
-        "💎 سود هر نفر برای محاسبه طرح نارون را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
+        "💎 سود طرح نارون برای هر نفر ۵٬۰۰۰٬۰۰۰ تومان است. لطفاً عدد ۵۰۰۰۰۰۰ را وارد کنید:"
       );
     }
 
@@ -5211,7 +5232,7 @@ ${e.message}`
 
       await sendMessage(
         chatId,
-        "💎 سود هر نفر برای محاسبه طرح نارون را وارد کنید.\n\nمبلغ باید بین ۵٬۰۰۰٬۰۰۰ تا ۶٬۰۰۰٬۰۰۰ تومان باشد:"
+        "💎 سود طرح نارون برای هر نفر ۵٬۰۰۰٬۰۰۰ تومان است. لطفاً عدد ۵۰۰۰۰۰۰ را وارد کنید:"
       );
     }
 
@@ -5253,6 +5274,10 @@ ${e.message}`
         phone: rq.phone || "",
         nationalCode: p.nationalCode || p.national_code || rq.national_code || "",
         adults: Number(p.adults || 0),
+        infants: Number(p.infants || 0),
+        child2to3: Number(p.child2to3 || 0),
+        child3to5: Number(p.child3to5 || 0),
+        child5to12: Number(p.child5to12 || 0),
         children: Number(p.children || 0),
         nights: Number(p.nights || 0),
         paymentType: p.paymentType || rq.payment_type || "cash"
@@ -5261,7 +5286,7 @@ ${e.message}`
 
     await sendMessage(
       chatId,
-      `✈️ محاسبه تور هوایی\n\n🆔 درخواست: ${code}\n👤 متقاضی: ${rq.applicant_name || ""}\n👨 بزرگسال: ${Number(p.adults || 0)} نفر\n👶 کودک: ${Number(p.children || 0)} نفر\n🌙 تعداد شب: ${Number(p.nights || 0)}\n\n✈️ مبلغ بلیت رفت هر بزرگسال را وارد کنید:`
+      `✈️ محاسبه تور هوایی\n\n🆔 درخواست: ${code}\n👤 متقاضی: ${rq.applicant_name || ""}\n👨 بزرگسال ۱۲ سال به بالا: ${Number(p.adults || 0)} نفر\n👶 نوزاد ۱۰ روزه تا زیر ۲ سال: ${Number(p.infants || 0)} نفر\n👧 کودک ۲ تا زیر ۳ سال: ${Number(p.child2to3 || 0)} نفر\n👧 کودک ۳ تا زیر ۵ سال: ${Number(p.child3to5 || 0)} نفر\n👦 کودک ۵ تا زیر ۱۲ سال: ${Number(p.child5to12 || 0)} نفر\n🌙 تعداد شب: ${Number(p.nights || 0)}\n\n✈️ مبلغ بلیت رفت هر بزرگسال را وارد کنید:`
     );
 
     return;
@@ -5299,6 +5324,10 @@ ${e.message}`
       phone: rq.phone || "",
       nationalCode: p.nationalCode || p.national_code || rq.national_code || "",
       adults: Number(p.adults || 0),
+      infants: Number(p.infants || 0),
+      child2to3: Number(p.child2to3 || 0),
+      child3to5: Number(p.child3to5 || 0),
+      child5to12: Number(p.child5to12 || 0),
       children: Number(p.children || 0),
       nights: Number(p.nights || 0),
       paymentType: p.paymentType || rq.payment_type || "cash",
@@ -5310,7 +5339,7 @@ ${e.message}`
 
     await sendMessage(
       chatId,
-      `🚌 محاسبه درخواست تور اتوبوسی\n\n🆔 درخواست: ${code}\n👤 متقاضی: ${rq.applicant_name || ""}\n👨 بزرگسال: ${Number(p.adults || 0)} نفر\n👶 کودک: ${Number(p.children || 0)} نفر\n🌙 تعداد شب: ${Number(p.nights || 0)}\n🎫 بلیت رفت و برگشت هر صندلی: ۴٬۰۰۰٬۰۰۰ تومان\n👶 کودک ۳ تا ۵ سال: بلیت کامل\n\n🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:`
+      `🚌 محاسبه درخواست تور اتوبوسی\n\n🆔 درخواست: ${code}\n👤 متقاضی: ${rq.applicant_name || ""}\n👨 بزرگسال ۱۲ سال به بالا: ${Number(p.adults || 0)} نفر\n👶 نوزاد ۱۰ روزه تا زیر ۲ سال: ${Number(p.infants || 0)} نفر\n👧 کودک ۲ تا زیر ۳ سال: ${Number(p.child2to3 || 0)} نفر\n👧 کودک ۳ تا زیر ۵ سال: ${Number(p.child3to5 || 0)} نفر\n👦 کودک ۵ تا زیر ۱۲ سال: ${Number(p.child5to12 || 0)} نفر\n🌙 تعداد شب: ${Number(p.nights || 0)}\n🎫 بلیت رفت و برگشت هر صندلی: ۴٬۰۰۰٬۰۰۰ تومان\n\n🏨 قیمت هتل هر بزرگسال / هر شب را وارد کنید:`
     );
 
     return;

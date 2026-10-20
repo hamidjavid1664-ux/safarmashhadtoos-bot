@@ -225,7 +225,7 @@ function formatRailCalculation(result) {
   text += `👶 نوزاد زیر ۲ سال: ${formatNumber(result.infants || 0)} نفر\n`;
   text += `👧 کودک ۲ تا زیر ۳ سال: ${formatNumber(result.child2to3 || 0)} نفر\n`;
   text += `👧 کودک ۳ تا زیر ۵ سال: ${formatNumber(result.child3to5 || 0)} نفر\n`;
-  text += `👦 کودک ۵ تا ۱۲ سال: ${formatNumber(result.child5to12 || 0)} نفر\n`;
+  text += `👦 کودک ۵ تا کمتر از ۱۲ سال: ${formatNumber(result.child5to12 || 0)} نفر\n`;
   text += `👥 مجموع: ${formatNumber(result.totalPassengers)} نفر\n`;
   text += `🌙 اقامت: ${formatNumber(result.nights)} شب\n`;
   text += `💳 پرداخت: ${paymentTitle}\n`;
@@ -241,7 +241,7 @@ function formatRailCalculation(result) {
 
   text += "\n━━━━━━━━━━━━━━\n🚆 بلیت رفت و برگشت\n\n";
   text += `🎫 بلیت بزرگسال + صدور: ${formatMoney(result.ticket.adultRoundTrip)}\n`;
-  text += `🎫 بلیت کودک ۲ تا ۱۲ سال با درصد ${formatNumber(result.childTicketPercent)}٪: ${formatMoney(result.ticket.childRoundTrip)}\n`;
+  text += `🎫 بلیت کودک ۲ تا کمتر از ۱۲ سال با درصد ${formatNumber(result.childTicketPercent)}٪: ${formatMoney(result.ticket.childRoundTrip)}\n`;
   text += `👶 بلیت نوزاد زیر ۲ سال: رایگان\n`;
 
   text += "\n━━━━━━━━━━━━━━\n🏨 هتل\n\n";
@@ -249,7 +249,7 @@ function formatRailCalculation(result) {
   text += `🏨 هزینه هتل بزرگسالان: ${formatMoney(result.adults * result.hotel.adultHotel)}\n`;
   text += `🏨 هزینه هتل زیر ۳ سال: رایگان\n`;
   text += `🏨 هزینه هتل ۳ تا زیر ۵ سال: ${formatMoney((result.child3to5 || 0) * (result.hotel.childHotel || 0))}\n`;
-  text += `🏨 هزینه هتل ۵ تا ۱۲ سال: ${formatMoney((result.child5to12 || 0) * result.hotel.adultHotel)}\n`;
+  text += `🏨 هزینه هتل ۵ تا کمتر از ۱۲ سال: ${formatMoney((result.child5to12 || 0) * result.hotel.adultHotel)}\n`;
   text += `💰 مجموع هزینه هتل برای کل اقامت: ${formatMoney(result.hotel.hotelCost)}\n`;
 
   text += "\n━━━━━━━━━━━━━━\n💰 هزینه تمام‌شده\n\n";
@@ -357,7 +357,7 @@ function formatManualCalculation(result) {
   text += `👶 نوزاد زیر ۲ سال: ${formatNumber(result.infants || 0)} نفر\n`;
   text += `👧 کودک ۲ تا زیر ۳ سال: ${formatNumber(result.child2to3 || 0)} نفر\n`;
   text += `👧 کودک ۳ تا زیر ۵ سال: ${formatNumber(result.child3to5 || 0)} نفر\n`;
-  text += `👦 کودک ۵ تا ۱۲ سال: ${formatNumber(result.child5to12 || 0)} نفر\n`;
+  text += `👦 کودک ۵ تا کمتر از ۱۲ سال: ${formatNumber(result.child5to12 || 0)} نفر\n`;
   text += `👥 مجموع: ${formatNumber(result.totalPassengers)} نفر\n`;
   text += `🌙 اقامت: ${formatNumber(result.nights)} شب\n\n`;
   text += "━━━━━━━━━━━━━━\n💰 هزینه‌ها\n\n";

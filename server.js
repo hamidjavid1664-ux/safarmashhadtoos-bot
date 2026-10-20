@@ -454,13 +454,16 @@ async function sendMessage(
 async function sendPhoto(
   chatId,
   photo,
-  caption
+  caption,
+  reply_markup
 ) {
-  return bale("sendPhoto", {
+  const body = {
     chat_id: String(chatId),
     photo,
     caption
-  });
+  };
+  if (reply_markup) body.reply_markup = reply_markup;
+  return bale("sendPhoto", body);
 }
 
 async function sendDocument(
@@ -3787,7 +3790,31 @@ async function handleMessage(
     }
     narvanKeyboard.push([{ text: "🚌 مشاهده تورها و محاسبه هزینه", callback_data: "NARVAN_TOURS" }]);
     narvanKeyboard.push([{ text: "🔙 بازگشت به منوی اصلی", callback_data: "NARVAN_BACK" }]);
-    await sendMessage(chatId, narvanPlanText(), { inline_keyboard: narvanKeyboard });
+    const narvanCaption = narvanEnabledCache
+      ? `🌳 طرح نارون شهر بهشت
+
+با طرح نارون، بخشی از هزینه سفر خانوادگی شما در قالب وام تأمین می‌شود.
+
+💰 تا ۵۰ میلیون تومان هزینه تور: ۲۰ میلیون تومان وام
+💰 بیشتر از ۵۰ تا ۷۰ میلیون تومان: ۳۰ میلیون تومان وام
+💰 بیشتر از ۷۰ تا ۱۰۰ میلیون تومان: ۴۰ میلیون تومان وام
+
+📅 بازپرداخت: ۱۸ ماهه
+📊 سود: ۴٪ کل دوره بازپرداخت
+
+💚 شهر بهشت؛ سفر هوشمندانه به مشهد مقدس`
+      : `🌳 طرح نارون شهر بهشت
+
+⏸️ طرح وام نارون فعلاً غیرفعال است.
+در حال حاضر امکان مشاهده تورها و ثبت سفر به‌صورت نقدی وجود دارد.
+
+💚 شهر بهشت؛ سفر هوشمندانه به مشهد مقدس`;
+    await sendPhoto(
+      chatId,
+      "https://safarmashhadtoos-bot.onrender.com/narvan-poster.png",
+      narvanCaption,
+      { inline_keyboard: narvanKeyboard }
+    );
     return;
   }
 
@@ -5588,6 +5615,11 @@ app.post(
  * صفحه تست Render
  * =========================================================
  */
+
+app.get(
+  "/narvan-poster.png",
+  (req, res) => res.sendFile(__dirname + "/narvan-poster.png")
+);
 
 app.get(
   "/",

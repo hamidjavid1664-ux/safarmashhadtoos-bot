@@ -3811,7 +3811,7 @@ async function handleMessage(
 💚 شهر بهشت؛ سفر هوشمندانه به مشهد مقدس`;
     await sendPhoto(
       chatId,
-      "https://safarmashhadtoos-bot.onrender.com/narvan-poster.png",
+      "https://safarmashhadtoos-bot.onrender.com/Mashhad Travel Loan Promotion Banner.png",
       narvanCaption,
       { inline_keyboard: narvanKeyboard }
     );

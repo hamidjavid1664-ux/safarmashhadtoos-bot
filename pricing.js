@@ -17,7 +17,7 @@ const SETTINGS = {
   LOAN_ROUND_STEP: 5000000,
   NARVAN_ROUND_STEP: 500000,
   NARVAN_TOUR_PROFIT_PER_PERSON: 5000000,
-  NARVAN_HOTEL_PROFIT_PER_PERSON: 600000
+  NARVAN_HOTEL_PROFIT_PER_PERSON_PER_NIGHT: 600000
 };
 
 const RAIL_TRAINS = {
@@ -194,11 +194,13 @@ function calculateRailTour(data) {
   const childHotelCost = halfHotelChildren * childHotelHalf + fullHotelChildren * childHotelFull;
   const childrenTotal = childTicketCost + childHotelCost;
   const netPurchaseTotal = adultsTotal + childrenTotal;
-  // سود تور در طرح نارون برای هر نفر ثابت و ۵ میلیون تومان است؛ سود جداگانه هتل به تور اضافه نمی‌شود.
-  const profitPerPerson = paymentType === "loan" ? SETTINGS.NARVAN_TOUR_PROFIT_PER_PERSON : SETTINGS.RAIL_CASH_PROFIT;
+  const profitPerPerson = paymentType === "loan" ? SETTINGS.RAIL_LOAN_PROFIT : SETTINGS.RAIL_CASH_PROFIT;
   const totalProfit = profitPerPerson * totalPassengers;
+  // سود هتل در طرح نارون جدا از سود تور و بر اساس نفر-شبِ مشمول هزینه هتل است.
   const hotelPayingPersonEquivalents = adults + child5to12 + (child3to5 * 0.5);
-  const hotelProfit = 0;
+  const hotelProfit = paymentType === "loan"
+    ? hotelPayingPersonEquivalents * nights * SETTINGS.NARVAN_HOTEL_PROFIT_PER_PERSON_PER_NIGHT
+    : 0;
   const finalPrice = roundCustomerAmount(netPurchaseTotal + totalProfit + hotelProfit);
   let customerCash = 0, loanAmount = 0, loanEligible = true, loanIneligibleReason = "";
   if (paymentType === "loan") {
@@ -317,17 +319,16 @@ function calculateManualTour(data) {
   // اگر مدیر سود را صریح وارد کرده باشد، همان مبلغ باید اعمال شود؛
   // در غیر این صورت از سود پیش‌فرض همان نوع تور استفاده می‌کنیم.
   let profitPerPerson = manualProfit;
-  if (type === "HOTEL") {
-    // رزرو فقط هتل در محاسبات ویژه نارون: ۶۰۰ هزار تومان برای هر نفر، یک‌بار.
-    profitPerPerson = SETTINGS.NARVAN_HOTEL_PROFIT_PER_PERSON;
-  } else if (data.manualProfit === undefined || data.manualProfit === null || data.manualProfit === "") {
+  if (data.manualProfit === undefined || data.manualProfit === null || data.manualProfit === "") {
     if (type === "AIR") profitPerPerson = paymentType === "loan" ? SETTINGS.AIR_LOAN_PROFIT : SETTINGS.AIR_CASH_PROFIT;
     else if (type === "RAIL") profitPerPerson = paymentType === "loan" ? SETTINGS.RAIL_LOAN_PROFIT : SETTINGS.RAIL_CASH_PROFIT;
   }
   const totalProfit = profitPerPerson * totalPassengers;
-  // برای تورهای نارون، سود ۵ میلیون تومانی هر نفر شامل سود فروش است؛ سود هتل جداگانه اضافه نمی‌شود.
+  // سود هتل نارون: ۶۰۰ هزار تومان برای هر نفرِ مشمول هزینه هتل در هر شب.
   const hotelPayingPersonEquivalents = adults + fullChildren + (legacyHalfChildren * 0.5);
-  const hotelProfit = 0;
+  const hotelProfit = paymentType === "loan"
+    ? hotelPayingPersonEquivalents * nights * SETTINGS.NARVAN_HOTEL_PROFIT_PER_PERSON_PER_NIGHT
+    : 0;
   const finalPrice = roundCustomerAmount(netPurchaseTotal + totalProfit + hotelProfit);
   let customerCash = 0, loanAmount = 0, loanEligible = true, loanIneligibleReason = "";
   if (paymentType === "loan") {

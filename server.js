@@ -1087,10 +1087,10 @@ async function askChildren(
   chatId,
   d
 ) {
-  await saveSession(chatId, "TOUR_INFANTS", d);
+  await saveSession(chatId, "TOUR_CHILDREN_TOTAL", d);
   await sendMessage(
     chatId,
-    "👶 تعداد نوزاد ۱۰ روزه تا کمتر از ۲ سال را وارد کنید.\nاگر ندارید ۰ بفرستید.",
+    "🧒 تعداد فرزندان ۲ تا کمتر از ۱۲ سال را وارد کنید.\nاین تعداد برای محاسبه بلیت کودک استفاده می‌شود؛ اگر ندارید ۰ بفرستید.",
     backKeyboard()
   );
 }
@@ -1379,31 +1379,46 @@ async function handleTourText(
     return true;
   }
 
-  if (["TOUR_INFANTS", "TOUR_CHILD_2_3", "TOUR_CHILD_3_5", "TOUR_CHILD_5_12"].includes(s.state)) {
+  if (["TOUR_CHILDREN_TOTAL", "TOUR_INFANTS", "TOUR_CHILD_2_3", "TOUR_CHILD_3_5"].includes(s.state)) {
     const n = Number(en(text).replace(/\D/g, ""));
     if (!Number.isInteger(n) || n < 0) {
       await sendMessage(chatId, "❌ تعداد مسافر صحیح نیست؛ یک عدد صفر یا بیشتر وارد کنید.");
       return true;
     }
+    if (s.state === "TOUR_CHILDREN_TOTAL") {
+      await saveSession(chatId, "TOUR_INFANTS", { ...d, children: n });
+      await sendMessage(chatId, "👶 تعداد نوزادان زیر ۲ سال را وارد کنید؛ اگر ندارید ۰ بفرستید.", backKeyboard());
+      return true;
+    }
     if (s.state === "TOUR_INFANTS") {
+      if (Number(d.children || 0) === 0) {
+        await askPayment(chatId, { ...d, infants: n, child2to3: 0, child3to5: 0, child5to12: 0, children: 0 });
+        return true;
+      }
       await saveSession(chatId, "TOUR_CHILD_2_3", { ...d, infants: n });
-      await sendMessage(chatId, "👧 تعداد کودک ۲ تا کمتر از ۳ سال را وارد کنید؛ اگر ندارید ۰ بفرستید.", backKeyboard());
+      await sendMessage(chatId, `🏨 از ${Number(d.children || 0)} کودک ۲ تا زیر ۱۲ سال، چند نفر ۲ تا زیر ۳ سال هستند؟\nاین گروه هتل رایگان است؛ اگر ندارید ۰ بفرستید.`, backKeyboard());
       return true;
     }
     if (s.state === "TOUR_CHILD_2_3") {
+      if (n > Number(d.children || 0)) {
+        await sendMessage(chatId, `❌ تعداد کودکان زیر ۳ سال نمی‌تواند از مجموع کودکان (${Number(d.children || 0)} نفر) بیشتر باشد. دوباره وارد کنید.`);
+        return true;
+      }
       await saveSession(chatId, "TOUR_CHILD_3_5", { ...d, child2to3: n });
-      await sendMessage(chatId, "👧 تعداد کودک ۳ تا کمتر از ۵ سال را وارد کنید؛ اگر ندارید ۰ بفرستید.", backKeyboard());
+      await sendMessage(chatId, `🏨 از ${Number(d.children || 0)} کودک ۲ تا زیر ۱۲ سال، چند نفر ۳ تا کمتر از ۵ سال هستند؟\nاین گروه هتل نیم‌بهاست؛ غذا دارد و تخت ندارد. اگر ندارید ۰ بفرستید.`, backKeyboard());
       return true;
     }
-    if (s.state === "TOUR_CHILD_3_5") {
-      await saveSession(chatId, "TOUR_CHILD_5_12", { ...d, child3to5: n });
-      await sendMessage(chatId, "👦 تعداد کودک ۵ تا کمتر از ۱۲ سال را وارد کنید؛ اگر ندارید ۰ بفرستید.", backKeyboard());
+    const under3 = Number(d.child2to3 || 0);
+    if (under3 + n > Number(d.children || 0)) {
+      await sendMessage(chatId, `❌ مجموع کودکان زیر ۳ سال و ۳ تا زیر ۵ سال نمی‌تواند از ${Number(d.children || 0)} نفر بیشتر باشد. دوباره وارد کنید.`);
       return true;
     }
+    const child5to12 = Number(d.children || 0) - under3 - n;
     await askPayment(chatId, {
       ...d,
-      child5to12: n,
-      children: Number(d.child2to3 || 0) + Number(d.child3to5 || 0) + n
+      child3to5: n,
+      child5to12,
+      children: Number(d.children || 0)
     });
     return true;
   }

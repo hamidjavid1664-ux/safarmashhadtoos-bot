@@ -1006,6 +1006,85 @@ ${e.message}`
 
 /*
  * =========================================================
+ * تقویم شمسی و انتخاب سن فرزندان در فرم مشتری
+ * =========================================================
+ */
+const JALALI_MONTHS = ["", "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
+function jalaliMonthLength(month) {
+  if (month >= 1 && month <= 6) return 31;
+  if (month >= 7 && month <= 11) return 30;
+  return 29; // برای سال جاری شمسی ۱۴۰۵، اسفند ۲۹ روز دارد.
+}
+function calendarKeyboard(year, month, mode, selectedDate = "") {
+  const today = todayJalali();
+  const todayYear = Number(today.split("/")[0]);
+  const rows = [];
+  rows.push([
+    { text: "◀️ ماه قبل", callback_data: `TOUR_CAL_NAV_${mode}_${year}_${month}_-1` },
+    { text: `${JALALI_MONTHS[month]} ${fa(year)}`, callback_data: "TOUR_CAL_NOOP" },
+    { text: "ماه بعد ▶️", callback_data: `TOUR_CAL_NAV_${mode}_${year}_${month}_1` }
+  ]);
+  rows.push(["ش", "ی", "د", "س", "چ", "پ", "ج"].map(x => ({ text: x, callback_data: "TOUR_CAL_NOOP" })));
+  const firstDay = jalaliToDay(`${year}/${String(month).padStart(2,"0")}/01`);
+  // jalaliToDay مبنا را به‌صورت روز پیوسته می‌دهد؛ 1405/01/01 جمعه است.
+  const offset = ((firstDay - jalaliToDay("1405/01/01") + 6) % 7 + 7) % 7;
+  const days = jalaliMonthLength(month);
+  let row = Array(offset).fill({ text: "·", callback_data: "TOUR_CAL_NOOP" });
+  for (let day = 1; day <= days; day++) {
+    const date = `${year}/${String(month).padStart(2,"0")}/${String(day).padStart(2,"0")}`;
+    const checked = validateTravelDate(date);
+    const futureValid = checked.ok && year === todayYear;
+    row.push({
+      text: selectedDate === date ? `✅${fa(day)}` : fa(day),
+      callback_data: futureValid ? `TOUR_CAL_DAY_${mode}_${year}_${month}_${day}` : "TOUR_CAL_NOOP"
+    });
+    if (row.length === 7) { rows.push(row); row = []; }
+  }
+  if (row.length) { while (row.length < 7) row.push({ text: "·", callback_data: "TOUR_CAL_NOOP" }); rows.push(row); }
+  rows.push([{ text: "❌ لغو", callback_data: "TOUR_CANCEL" }]);
+  return { inline_keyboard: rows };
+}
+async function showTourCalendar(chatId, mode, year, month, data = {}) {
+  const current = todayJalali().split("/").map(Number);
+  year = Number(year || current[0]); month = Number(month || current[1]);
+  if (year !== current[0]) year = current[0];
+  month = Math.max(1, Math.min(12, month));
+  const state = mode === "IN" ? "TOUR_DATE_IN" : "TOUR_DATE_OUT";
+  await saveSession(chatId, state, { ...data, calendarMode: mode, calendarYear: year, calendarMonth: month });
+  await sendMessage(chatId,
+    mode === "IN" ? "📅 تاریخ ورود به مشهد را از تقویم انتخاب کنید:" : `📅 تاریخ خروج از مشهد را انتخاب کنید.\nتاریخ ورود: ${data.departureDate || "ثبت نشده"}`,
+    calendarKeyboard(year, month, mode, mode === "IN" ? data.departureDate : data.returnDate));
+}
+function childAgeKeyboard(index, total) {
+  return { inline_keyboard: [
+    [{ text: "👶 زیر ۲ سال", callback_data: `TOUR_CHILD_AGE_${index}_UNDER2` }],
+    [{ text: "🧒 ۲ تا کمتر از ۳ سال", callback_data: `TOUR_CHILD_AGE_${index}_AGE2_3` }],
+    [{ text: "🧒 ۳ تا کمتر از ۵ سال", callback_data: `TOUR_CHILD_AGE_${index}_AGE3_5` }],
+    [{ text: "👦 ۵ تا کمتر از ۱۲ سال", callback_data: `TOUR_CHILD_AGE_${index}_AGE5_12` }],
+    [{ text: "❌ لغو درخواست", callback_data: "TOUR_CANCEL" }]
+  ] };
+}
+async function askChildAge(chatId, data) {
+  const ages = Array.isArray(data.childAges) ? data.childAges : [];
+  const total = Number(data.childCount || 0);
+  if (ages.length >= total) {
+    const counts = { infants: 0, child2to3: 0, child3to5: 0, child5to12: 0 };
+    for (const age of ages) {
+      if (age === "under2") counts.infants++;
+      else if (age === "2to3") counts.child2to3++;
+      else if (age === "3to5") counts.child3to5++;
+      else if (age === "5to12") counts.child5to12++;
+    }
+    await askPayment(chatId, { ...data, ...counts, children: counts.child2to3 + counts.child3to5 + counts.child5to12 });
+    return;
+  }
+  const index = ages.length + 1;
+  await saveSession(chatId, "TOUR_CHILD_AGE_PICK", data);
+  await sendMessage(chatId, `👨‍👩‍👧‍👦 فرزند ${fa(index)} از ${fa(total)}\n\nسن این فرزند را انتخاب کنید. ربات از همین انتخاب برای محاسبه بلیت و هتل استفاده می‌کند:`, childAgeKeyboard(index, total));
+}
+
+/*
+ * =========================================================
  * شروع فرم تور
  * =========================================================
  */
@@ -1022,14 +1101,11 @@ async function startTour(
     }
   );
 
-  await sendMessage(
-    chatId,
-    `📋 ${TOUR_NAMES[type]}
+  await sendMessage(chatId, `📋 ${TOUR_NAMES[type]}
 
-📅 تاریخ ورود به مشهد را وارد کنید.
-مثال: ۱۴۰۵/۰۷/۱۳`,
-    backKeyboard()
-  );
+برای ثبت سریع‌تر، تاریخ ورود و خروج را از تقویم شمسی انتخاب کنید.`);
+  const now = todayJalali().split("/").map(Number);
+  await showTourCalendar(chatId, "IN", now[0], now[1], { tourType: type });
 }
 
 async function askTourOut(
@@ -1042,11 +1118,8 @@ async function askTourOut(
     d
   );
 
-  await sendMessage(
-    chatId,
-    "📅 تاریخ خروج از مشهد را وارد کنید.\nمثال: ۱۴۰۵/۰۷/۱۶",
-    backKeyboard()
-  );
+  const now = todayJalali().split("/").map(Number);
+  await showTourCalendar(chatId, "OUT", now[0], now[1], d);
 }
 
 async function askNights(
@@ -1087,12 +1160,8 @@ async function askChildren(
   chatId,
   d
 ) {
-  await saveSession(chatId, "TOUR_CHILDREN_TOTAL", d);
-  await sendMessage(
-    chatId,
-    "🧒 تعداد فرزندان ۲ تا کمتر از ۱۲ سال را وارد کنید.\nاین تعداد برای محاسبه بلیت کودک استفاده می‌شود؛ اگر ندارید ۰ بفرستید.",
-    backKeyboard()
-  );
+  await saveSession(chatId, "TOUR_CHILD_COUNT", d);
+  await sendMessage(chatId, "👶 تعداد کل فرزندان زیر ۱۲ سال را وارد کنید (شامل نوزادان).\nاگر فرزندی ندارید، ۰ بفرستید.", backKeyboard());
 }
 
 async function askPayment(
@@ -1287,41 +1356,8 @@ async function handleTourText(
 ) {
   const d = s.data || {};
 
-  if (s.state === "TOUR_DATE_IN") {
-    const checked = validateTravelDate(text);
-    if (!checked.ok) {
-      const msg = checked.reason === "past"
-        ? "❌ تاریخ ورود نمی‌تواند قبل از امروز باشد. تاریخ امروز یا روزهای آینده را وارد کنید."
-        : checked.reason === "year"
-          ? `❌ فقط تاریخ‌های سال جاری شمسی (${todayJalali().split("/")[0]}) پذیرفته می‌شود.`
-          : "❌ تاریخ صحیح نیست. مثال: ۱۴۰۵/۰۷/۱۳";
-      await sendMessage(chatId, msg);
-      return true;
-    }
-
-    await askTourOut(chatId, { ...d, departureDate: checked.normalized });
-
-    return true;
-  }
-
-  if (s.state === "TOUR_DATE_OUT") {
-    const checked = validateTravelDate(text);
-    if (!checked.ok) {
-      const msg = checked.reason === "past"
-        ? "❌ تاریخ خروج نمی‌تواند قبل از امروز باشد. تاریخ امروز یا روزهای آینده را وارد کنید."
-        : checked.reason === "year"
-          ? `❌ فقط تاریخ‌های سال جاری شمسی (${todayJalali().split("/")[0]}) پذیرفته می‌شود.`
-          : "❌ تاریخ صحیح نیست. مثال: ۱۴۰۵/۰۷/۱۶";
-      await sendMessage(chatId, msg);
-      return true;
-    }
-    if (d.departureDate && jalaliToDay(checked.normalized) <= jalaliToDay(d.departureDate)) {
-      await sendMessage(chatId, "❌ تاریخ خروج باید بعد از تاریخ ورود باشد. دوباره تاریخ خروج را وارد کنید.");
-      return true;
-    }
-
-    await askNights(chatId, { ...d, returnDate: checked.normalized });
-
+  if (s.state === "TOUR_DATE_IN" || s.state === "TOUR_DATE_OUT") {
+    await sendMessage(chatId, "لطفاً تاریخ را از تقویم شمسی و با زدن دکمه روز موردنظر انتخاب کنید.", calendarKeyboard(Number(d.calendarYear || todayJalali().split("/")[0]), Number(d.calendarMonth || todayJalali().split("/")[1]), s.state === "TOUR_DATE_IN" ? "IN" : "OUT", s.state === "TOUR_DATE_IN" ? d.departureDate : d.returnDate));
     return true;
   }
 
@@ -1379,47 +1415,18 @@ async function handleTourText(
     return true;
   }
 
-  if (["TOUR_CHILDREN_TOTAL", "TOUR_INFANTS", "TOUR_CHILD_2_3", "TOUR_CHILD_3_5"].includes(s.state)) {
+  if (s.state === "TOUR_CHILD_COUNT") {
     const n = Number(en(text).replace(/\D/g, ""));
-    if (!Number.isInteger(n) || n < 0) {
-      await sendMessage(chatId, "❌ تعداد مسافر صحیح نیست؛ یک عدد صفر یا بیشتر وارد کنید.");
+    if (!Number.isInteger(n) || n < 0 || n > 10) {
+      await sendMessage(chatId, "❌ تعداد فرزندان باید عددی بین ۰ تا ۱۰ باشد.");
       return true;
     }
-    if (s.state === "TOUR_CHILDREN_TOTAL") {
-      await saveSession(chatId, "TOUR_INFANTS", { ...d, children: n });
-      await sendMessage(chatId, "👶 تعداد نوزادان زیر ۲ سال را وارد کنید؛ اگر ندارید ۰ بفرستید.", backKeyboard());
-      return true;
+    const next = { ...d, childCount: n, childAges: [] };
+    if (n === 0) {
+      await askPayment(chatId, { ...next, infants: 0, child2to3: 0, child3to5: 0, child5to12: 0, children: 0 });
+    } else {
+      await askChildAge(chatId, next);
     }
-    if (s.state === "TOUR_INFANTS") {
-      if (Number(d.children || 0) === 0) {
-        await askPayment(chatId, { ...d, infants: n, child2to3: 0, child3to5: 0, child5to12: 0, children: 0 });
-        return true;
-      }
-      await saveSession(chatId, "TOUR_CHILD_2_3", { ...d, infants: n });
-      await sendMessage(chatId, `🏨 از ${Number(d.children || 0)} کودک ۲ تا زیر ۱۲ سال، چند نفر ۲ تا زیر ۳ سال هستند؟\nاین گروه هتل رایگان است؛ اگر ندارید ۰ بفرستید.`, backKeyboard());
-      return true;
-    }
-    if (s.state === "TOUR_CHILD_2_3") {
-      if (n > Number(d.children || 0)) {
-        await sendMessage(chatId, `❌ تعداد کودکان زیر ۳ سال نمی‌تواند از مجموع کودکان (${Number(d.children || 0)} نفر) بیشتر باشد. دوباره وارد کنید.`);
-        return true;
-      }
-      await saveSession(chatId, "TOUR_CHILD_3_5", { ...d, child2to3: n });
-      await sendMessage(chatId, `🏨 از ${Number(d.children || 0)} کودک ۲ تا زیر ۱۲ سال، چند نفر ۳ تا کمتر از ۵ سال هستند؟\nاین گروه هتل نیم‌بهاست؛ غذا دارد و تخت ندارد. اگر ندارید ۰ بفرستید.`, backKeyboard());
-      return true;
-    }
-    const under3 = Number(d.child2to3 || 0);
-    if (under3 + n > Number(d.children || 0)) {
-      await sendMessage(chatId, `❌ مجموع کودکان زیر ۳ سال و ۳ تا زیر ۵ سال نمی‌تواند از ${Number(d.children || 0)} نفر بیشتر باشد. دوباره وارد کنید.`);
-      return true;
-    }
-    const child5to12 = Number(d.children || 0) - under3 - n;
-    await askPayment(chatId, {
-      ...d,
-      child3to5: n,
-      child5to12,
-      children: Number(d.children || 0)
-    });
     return true;
   }
 
@@ -3393,7 +3400,7 @@ async function manualText(
 
     await sendMessage(
       chatId,
-      d.type === "HOTEL" ? "🏨 سود رزرو فقط هتل در طرح نارون ثابت است: نفری ۶۰۰٬۰۰۰ تومان." : "📈 سود هر نفر را وارد کنید:"
+      "📈 سود هر نفر را وارد کنید:"
     );
 
     return true;
@@ -4186,6 +4193,60 @@ async function handleCallback(
   await answerCallback(
     cb.id
   );
+
+  // تقویم شمسی فرم تور مشتری
+  if (data === "TOUR_CAL_NOOP") return;
+  if (data.startsWith("TOUR_CAL_NAV_")) {
+    const parts = data.split("_"); // TOUR CAL NAV MODE YEAR MONTH DELTA
+    const mode = parts[3];
+    const year = Number(parts[4]);
+    const month = Number(parts[5]);
+    const delta = Number(parts[6]);
+    // تاریخ‌های سفر فقط در سال جاری پذیرفته می‌شوند؛ تقویم در همان سال می‌ماند.
+    const nextMonth = Math.max(1, Math.min(12, month + delta));
+    const nextYear = Number(todayJalali().split("/")[0]);
+    const ss = await getSession(chatId);
+    await showTourCalendar(chatId, mode, nextYear, nextMonth, ss?.data || {});
+    return;
+  }
+  if (data.startsWith("TOUR_CAL_DAY_")) {
+    const parts = data.split("_"); // TOUR CAL DAY MODE YEAR MONTH DAY
+    const mode = parts[3];
+    const year = Number(parts[4]), month = Number(parts[5]), day = Number(parts[6]);
+    const date = `${year}/${String(month).padStart(2,"0")}/${String(day).padStart(2,"0")}`;
+    const checked = validateTravelDate(date);
+    if (!checked.ok) {
+      await sendMessage(chatId, "❌ این تاریخ قابل انتخاب نیست. لطفاً امروز یا یکی از روزهای آینده در سال جاری را انتخاب کنید.");
+      return;
+    }
+    const ss = await getSession(chatId);
+    const d = ss?.data || {};
+    if (mode === "IN") {
+      await askTourOut(chatId, { ...d, departureDate: checked.normalized });
+      return;
+    }
+    if (!d.departureDate || jalaliToDay(checked.normalized) <= jalaliToDay(d.departureDate)) {
+      await sendMessage(chatId, "❌ تاریخ خروج باید بعد از تاریخ ورود باشد. لطفاً روز دیگری انتخاب کنید.", calendarKeyboard(year, month, "OUT", d.returnDate));
+      return;
+    }
+    await askNights(chatId, { ...d, returnDate: checked.normalized });
+    return;
+  }
+  if (data.startsWith("TOUR_CHILD_AGE_")) {
+    const parts = data.split("_");
+    const index = Number(parts[3]);
+    const ageCode = parts.slice(4).join("_");
+    const ageMap = { UNDER2: "under2", AGE2_3: "2to3", AGE3_5: "3to5", AGE5_12: "5to12" };
+    const selectedAge = ageMap[ageCode];
+    const ss = await getSession(chatId);
+    if (!ss || ss.state !== "TOUR_CHILD_AGE_PICK" || !selectedAge) return;
+    const d = ss.data || {};
+    const ages = Array.isArray(d.childAges) ? [...d.childAges] : [];
+    if (index !== ages.length + 1) return;
+    ages.push(selectedAge);
+    await askChildAge(chatId, { ...d, childAges: ages });
+    return;
+  }
 
   if (["ADMIN_DIAMOND_STATUS", "ADMIN_DIAMOND_ENABLE", "ADMIN_DIAMOND_DISABLE"].includes(data)) {
     if (!isAdmin(chatId)) {

@@ -3378,7 +3378,7 @@ async function manualText(
 
     await sendMessage(
       chatId,
-      "📈 سود هر نفر را وارد کنید:"
+      d.type === "HOTEL" ? "🏨 سود رزرو فقط هتل در طرح نارون ثابت است: نفری ۶۰۰٬۰۰۰ تومان." : "📈 سود هر نفر را وارد کنید:"
     );
 
     return true;

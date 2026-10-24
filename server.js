@@ -559,6 +559,9 @@ function mainKeyboard() {
       [
         {
           text: "📋 پیگیری درخواست"
+        },
+        {
+          text: "⭐ ثبت بازخورد"
         }
       ]
     ],
@@ -2445,7 +2448,13 @@ async function runFeedbackScheduler() {
     const today = todayJalali();
     const todayDay = jalaliToDay(today);
 
+    // برای جلوگیری از هجوم پیام‌ها پس از راه‌اندازی مجدد، در هر نوبت
+    // حداکثر ۵ دعوت‌نامه ارسال می‌شود؛ بقیه در نوبت‌های بعدی بررسی می‌شوند.
+    let sentThisRun = 0;
+    const MAX_FEEDBACK_INVITES_PER_RUN = 5;
+
     for (const req of r.rows) {
+      if (sentThisRun >= MAX_FEEDBACK_INVITES_PER_RUN) break;
       const payload = req.payload || {};
       let returnDate;
       let returnDay;
@@ -2468,6 +2477,7 @@ async function runFeedbackScheduler() {
       try {
         if (!req.user_id) throw new Error("برای درخواست شناسه کاربر ثبت نشده است.");
         await startFeedback(req);
+        sentThisRun += 1;
       } catch (e) {
         console.error("❌ Feedback send error:", req.request_code, e.message);
         const blocked = /bot was blocked by the user|bot was kicked|Forbidden/i.test(String(e.message || ""));
@@ -3865,6 +3875,59 @@ async function handleMessage(
       mainKeyboard()
     );
 
+    return;
+  }
+
+  /*
+   * ثبت بازخورد به درخواست مشتری
+   */
+  if (text === "⭐ ثبت بازخورد") {
+    const eligible = await pool.query(
+      `SELECT request_code, user_id, applicant_name, payment_type, payload, status, updated_at
+       FROM requests
+       WHERE user_id=$1
+         AND status IN ('approved','receipt_received','passenger_received','completed','confirmed','paid')
+         AND COALESCE(payload->>'returnDate', payload->>'return_date', payload->>'checkoutDate') IS NOT NULL
+         AND COALESCE(payload->>'feedbackCompleted','false') <> 'true'
+       ORDER BY updated_at DESC NULLS LAST
+       LIMIT 100`,
+      [String(chatId)]
+    );
+
+    const todayDay = jalaliToDay(todayJalali());
+    let selected = null;
+    for (const req of eligible.rows) {
+      const payload = req.payload || {};
+      try {
+        const returnDate = normalizeDate(payload.returnDate || payload.return_date || payload.checkoutDate);
+        if (returnDate && jalaliToDay(returnDate) < todayDay) {
+          selected = req;
+          break;
+        }
+      } catch (_) {
+        // تاریخ نامعتبر را رد می‌کنیم و درخواست بعدی را بررسی می‌کنیم.
+      }
+    }
+
+    if (!selected) {
+      await sendMessage(
+        chatId,
+        "🌷 در حال حاضر درخواستِ واجد شرایطی برای ثبت بازخورد پیدا نشد. پس از پایان سفر می‌توانید از همین دکمه نظر خود را ثبت کنید. اگر قبلاً بازخوردتان را فرستاده‌اید، از شما سپاسگزاریم. 🙏",
+        mainKeyboard()
+      );
+      return;
+    }
+
+    try {
+      await startFeedback(selected);
+      await pool.query(
+        `UPDATE requests SET payload=payload || $2::jsonb, updated_at=NOW() WHERE request_code=$1`,
+        [selected.request_code, JSON.stringify({ feedbackInvited: true, feedbackDeliveryUnavailable: false })]
+      );
+    } catch (e) {
+      console.error("❌ Manual feedback start error:", selected.request_code, e.message);
+      await sendMessage(chatId, "⚠️ شروع ثبت بازخورد فعلاً ممکن نشد. لطفاً کمی بعد دوباره تلاش کنید.", mainKeyboard());
+    }
     return;
   }
 

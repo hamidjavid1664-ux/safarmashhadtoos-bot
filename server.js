@@ -788,22 +788,31 @@ ${CONFIG.PAYMENT.iban}
  */
 
 function diamondPaymentText(req) {
-  const total = Number(
-    req.payload?.totalCost || 0
-  );
+  const calc = req.payload?.calculation || {};
+  const total = Number(calc.finalPrice ?? calc.finalCost ?? calc.totalCost ?? req.payload?.totalCost ?? 0);
 
   if (total > 0) {
-    const cash = Number(
-      req.payload?.calculation?.customerCash ??
-      req.payload?.calculation?.cashAmount ??
-      Math.ceil(total * 0.7)
-    );
+    const savedCash = calc.customerCash ?? calc.cashAmount ?? calc.customerPayment ?? calc.payableCash;
+    const savedLoan = Number(calc.loanAmount ?? 0);
+    // هیچ نسبت ۷۰/۳۰ استفاده نمی‌شود؛ اگر مبلغ نقدی ذخیره نشده باشد،
+    // آن را از مبلغ وام پلکانی نارون محاسبه می‌کنیم.
+    let cash;
+    if (savedCash !== undefined && savedCash !== null && savedCash !== "") {
+      cash = Number(savedCash);
+    } else if (savedLoan > 0) {
+      cash = Math.max(0, total - savedLoan);
+    } else if (total <= 100000000) {
+      cash = Math.max(0, total - PRICING.getNarvanLoanAmount(total));
+    } else {
+      cash = total;
+    }
 
     return `🌳 درخواست وام طرح نارون تأیید شد.
 
 🆔 درخواست: ${req.request_code}
 💰 هزینه کل سفر: ${money(total)} تومان
-💳 سهم نقدی ۷۰٪: ${money(cash)} تومان
+🌳 مبلغ وام نارون: ${money(savedLoan || Math.max(0, total - cash))} تومان
+💵 مبلغ پرداخت نقدی: ${money(cash)} تومان
 
 ✅ درخواست شما توسط مدیر تأیید شد.
 
@@ -836,6 +845,7 @@ function calculatedPaymentText(req) {
     payload.calculation || {};
 
   const total = Number(
+    calc.finalPrice ??
     calc.finalCost ??
     calc.totalCost ??
     payload.totalCost ??
@@ -869,13 +879,18 @@ function calculatedPaymentText(req) {
 `;
 
   if (paymentType === "loan") {
-    const customerCash = Number(
-      calc.customerCash ??
-      calc.cashAmount ??
-      calc.customerPayment ??
-      calc.payableCash ??
-      Math.ceil(total * 0.7)
-    );
+    const savedCash = calc.customerCash ?? calc.cashAmount ?? calc.customerPayment ?? calc.payableCash;
+    const savedLoan = Number(calc.loanAmount ?? 0);
+    let customerCash;
+    if (savedCash !== undefined && savedCash !== null && savedCash !== "") {
+      customerCash = Number(savedCash);
+    } else if (savedLoan > 0) {
+      customerCash = Math.max(0, total - savedLoan);
+    } else if (total <= 100000000) {
+      customerCash = Math.max(0, total - PRICING.getNarvanLoanAmount(total));
+    } else {
+      customerCash = total;
+    }
 
     text += `
 🌳 نوع پرداخت: وام طرح نارون

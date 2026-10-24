@@ -202,7 +202,8 @@ function calculateRailTour(data) {
     : (train.childTicket !== undefined ? train.childTicket : train.ticket * childTicketPercent / 100);
   const childRoundTrip = (childTicketOneWay + issueOneWay) * 2;
   const infantTicketOneWay = Math.max(0, toNumber(train.infantTicket));
-  const infantRoundTrip = infantTicketOneWay > 0 ? (infantTicketOneWay + issueOneWay) * 2 : 0;
+  // هزینه صدور بلیت برای هر عضو، حتی نوزادی که کرایه بلیت او صفر است: ۲۰۰ هزار تومان در هر مسیر.
+  const infantRoundTrip = (infantTicketOneWay + issueOneWay) * 2;
   let adultTrainNet = adultRoundTrip, childTrainNet = childRoundTrip, infantTrainNet = infantRoundTrip, privateCompartmentFee = 0, compartmentPlan = null;
   if (privateCompartment) {
     if (totalPassengers !== 3 && totalPassengers !== 5) throw new Error("اجاره کوپه اختصاصی طبق فرمول فعلی فقط برای ۳ یا ۵ نفر فعال است.");

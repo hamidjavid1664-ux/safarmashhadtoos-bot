@@ -1,13 +1,17 @@
-name	"safarmashhadtoos-bot"
-version	"2.0.0"
-description	"Safar Mashhad Toos Bale travel bot"
-main	"server.js"
-scripts	
-start	"node server.js"
-check	"node --check server.js && node --check pricing.js"
-engines	
-node	">=18"
-dependencies	
-dotenv	"^16.4.7"
-express	"^5.1.0"
-pg	"^8.16.3"
+
+{
+  "name": "safarmashhadtoos-bot",
+  "version": "2.0.0",
+  "description": "Safar Mashhad Toos Bale Bot",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "pg": "^8.16.3"
+  }
+}

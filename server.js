@@ -158,10 +158,16 @@ function getFirstName(m) {
   );
 }
 
+function normalizePhone(v) {
+  let phone = en(v).replace(/[\s()\-]/g, "");
+  if (phone.startsWith("+98")) phone = "0" + phone.slice(3);
+  else if (phone.startsWith("0098")) phone = "0" + phone.slice(4);
+  else if (phone.startsWith("98") && phone.length === 12) phone = "0" + phone.slice(2);
+  return phone;
+}
+
 function validPhone(v) {
-  return /^09\d{9}$/.test(
-    en(v).replace(/\s/g, "")
-  );
+  return /^09\d{9}$/.test(normalizePhone(v));
 }
 
 function validNational(v) {
@@ -191,7 +197,7 @@ function normalizeDate(v) {
     m < 1 ||
     m > 12 ||
     d < 1 ||
-    d > (m <= 6 ? 31 : m <= 11 ? 30 : 30)
+    d > (m <= 6 ? 31 : m <= 11 ? 30 : 29)
   ) {
     return null;
   }
@@ -449,6 +455,12 @@ async function sendMessage(
   }
 
   return bale("sendMessage", b);
+}
+
+async function editMessageText(chatId, messageId, text, reply_markup) {
+  const body = { chat_id: String(chatId), message_id: Number(messageId), text };
+  if (reply_markup) body.reply_markup = reply_markup;
+  return bale("editMessageText", body);
 }
 
 async function sendPhoto(
@@ -1026,8 +1038,9 @@ function calendarKeyboard(year, month, mode, selectedDate = "") {
   ]);
   rows.push(["ش", "ی", "د", "س", "چ", "پ", "ج"].map(x => ({ text: x, callback_data: "TOUR_CAL_NOOP" })));
   const firstDay = jalaliToDay(`${year}/${String(month).padStart(2,"0")}/01`);
-  // jalaliToDay مبنا را به‌صورت روز پیوسته می‌دهد؛ 1405/01/01 جمعه است.
-  const offset = ((firstDay - jalaliToDay("1405/01/01") + 6) % 7 + 7) % 7;
+  // هفته از شنبه شروع می‌شود؛ ۱۴۰۵/۰۱/۰۱ شنبه بوده و ۱۴۰۵/۰۷/۰۱ چهارشنبه است.
+  // اضافه‌کردن ۶ در نسخه قبلی باعث می‌شد تقویم یک روز عقب بیفتد.
+  const offset = ((firstDay - jalaliToDay("1405/01/01")) % 7 + 7) % 7;
   const days = jalaliMonthLength(month);
   let row = Array(offset).fill({ text: "·", callback_data: "TOUR_CAL_NOOP" });
   for (let day = 1; day <= days; day++) {
@@ -1044,16 +1057,26 @@ function calendarKeyboard(year, month, mode, selectedDate = "") {
   rows.push([{ text: "❌ لغو", callback_data: "TOUR_CANCEL" }]);
   return { inline_keyboard: rows };
 }
-async function showTourCalendar(chatId, mode, year, month, data = {}) {
+async function showTourCalendar(chatId, mode, year, month, data = {}, messageId = null) {
   const current = todayJalali().split("/").map(Number);
   year = Number(year || current[0]); month = Number(month || current[1]);
   if (year !== current[0]) year = current[0];
   month = Math.max(1, Math.min(12, month));
   const state = mode === "IN" ? "TOUR_DATE_IN" : "TOUR_DATE_OUT";
   await saveSession(chatId, state, { ...data, calendarMode: mode, calendarYear: year, calendarMonth: month });
-  await sendMessage(chatId,
-    mode === "IN" ? "📅 تاریخ ورود به مشهد را از تقویم انتخاب کنید:" : `📅 تاریخ خروج از مشهد را انتخاب کنید.\nتاریخ ورود: ${data.departureDate || "ثبت نشده"}`,
-    calendarKeyboard(year, month, mode, mode === "IN" ? data.departureDate : data.returnDate));
+  const prompt = mode === "IN"
+    ? "📅 تاریخ ورود به مشهد را از تقویم انتخاب کنید:"
+    : `📅 تاریخ خروج از مشهد را انتخاب کنید.\nتاریخ ورود: ${data.departureDate || "ثبت نشده"}`;
+  const keyboard = calendarKeyboard(year, month, mode, mode === "IN" ? data.departureDate : data.returnDate);
+  if (messageId) {
+    try {
+      await editMessageText(chatId, messageId, prompt, keyboard);
+      return;
+    } catch (e) {
+      console.log("Calendar edit fallback:", e.message);
+    }
+  }
+  await sendMessage(chatId, prompt, keyboard);
 }
 function childAgeKeyboard(index, total) {
   return { inline_keyboard: [
@@ -1110,7 +1133,8 @@ async function startTour(
 
 async function askTourOut(
   chatId,
-  d
+  d,
+  calendarMessageId = null
 ) {
   await saveSession(
     chatId,
@@ -1119,7 +1143,7 @@ async function askTourOut(
   );
 
   const now = todayJalali().split("/").map(Number);
-  await showTourCalendar(chatId, "OUT", now[0], now[1], d);
+  await showTourCalendar(chatId, "OUT", now[0], now[1], d, calendarMessageId);
 }
 
 async function askNights(
@@ -1185,7 +1209,7 @@ async function askPayment(
             callback_data: "TOUR_PAYMENT_CASH"
           }
         ],
-        ...(narvanEnabledCache && d?.tourType !== "HOTEL" ? [[
+        ...(narvanEnabledCache ? [[
           {
             text: "🌳 وام طرح نارون",
             callback_data: "TOUR_PAYMENT_LOAN"
@@ -1451,8 +1475,7 @@ async function handleTourText(
   }
 
   if (s.state === "TOUR_PHONE") {
-    const p =
-      en(text).replace(/\s/g, "");
+    const p = normalizePhone(text);
 
     if (!validPhone(p)) {
       await sendMessage(
@@ -2862,26 +2885,38 @@ async function railText(
       return true;
     }
 
-    await saveSession(chatId, "RAIL_CHILD_PERCENT_INPUT", { ...d, hotelPricePerPersonPerNight: v, childTicketPercent: trainChildTicketPercentCache });
-    await sendMessage(chatId, `🎫 درصد بلیت خردسال قطار را وارد کنید.
-درصد فعلی: ${trainChildTicketPercentCache}٪
+    const selectedTrain = PRICING.getTrainsForRoute(d.route || "AHVAZ").find(t => t.key === d.trainKey);
+    const defaultPercent = Number(selectedTrain?.childTicketPercent || trainChildTicketPercentCache);
+    await saveSession(chatId, "RAIL_CHILD_PERCENT_INPUT", { ...d, hotelPricePerPersonPerNight: v, childTicketPercent: defaultPercent, useCustomChildPercent: false });
+    await sendMessage(chatId, `🎫 نرخ کودک این قطار: ${defaultPercent}٪ (بر اساس نرخ ثبت‌شده)
 
-یک عدد بین ۱ تا ۱۰۰ وارد کنید؛ این مقدار برای محاسبات بعدی هم ذخیره می‌شود.`);
+برای استفاده از نرخ دقیق ثبت‌شده کودک، عدد ۰ را بفرستید.
+برای محاسبه با درصد دلخواه، عددی بین ۱ تا ۱۰۰ وارد کنید. درصد دلخواه برای محاسبات بعدی ذخیره می‌شود.`);
 
     return true;
   }
 
   if (s.state === "RAIL_CHILD_PERCENT_INPUT") {
-    if (v < 1 || v > 100) {
-      await sendMessage(chatId, "❌ درصد باید عددی بین ۱ تا ۱۰۰ باشد. دوباره وارد کنید:");
+    if (v < 0 || v > 100) {
+      await sendMessage(chatId, "❌ عدد باید ۰ تا ۱۰۰ باشد. عدد ۰ یعنی استفاده از نرخ ثبت‌شده قطار.");
+      return true;
+    }
+    let next;
+    if (v === 0) {
+      const selectedTrain = PRICING.getTrainsForRoute(d.route || "AHVAZ").find(t => t.key === d.trainKey);
+      next = { ...d, childTicketPercent: Number(selectedTrain?.childTicketPercent || trainChildTicketPercentCache), useCustomChildPercent: false };
+      await saveSession(chatId, "RAIL_PAYMENT", next);
+      await sendMessage(chatId, "✅ نرخ ثبت‌شده همین قطار برای بزرگسال، کودک و نوزاد استفاده می‌شود. نوع محاسبه را انتخاب کنید:", { inline_keyboard: [
+        [{ text: "💵 نقدی", callback_data: "RAIL_PAYMENT_CASH" }, { text: "🌳 وام طرح نارون", callback_data: "RAIL_PAYMENT_LOAN" }],
+        [{ text: "🔙 خروج", callback_data: "ADMIN_CALC_EXIT" }]
+      ] });
       return true;
     }
     trainChildTicketPercentCache = v;
     await pool.query(`INSERT INTO narvan_settings (setting_key, setting_value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (setting_key) DO UPDATE SET setting_value=EXCLUDED.setting_value, updated_at=NOW()`, ["train_child_ticket_percent", String(v)]);
-    const next = { ...d, childTicketPercent: v };
+    next = { ...d, childTicketPercent: v, useCustomChildPercent: true };
     await saveSession(chatId, "RAIL_PAYMENT", next);
-    await sendMessage(chatId, `✅ درصد بلیت خردسال قطار روی ${v}٪ ذخیره شد.
-💳 نوع محاسبه را انتخاب کنید:`, { inline_keyboard: [
+    await sendMessage(chatId, `✅ درصد دلخواه کودک روی ${v}٪ ذخیره شد. نوع محاسبه را انتخاب کنید:`, { inline_keyboard: [
       [{ text: "💵 نقدی", callback_data: "RAIL_PAYMENT_CASH" }, { text: "🌳 وام طرح نارون", callback_data: "RAIL_PAYMENT_LOAN" }],
       [{ text: "🔙 خروج", callback_data: "ADMIN_CALC_EXIT" }]
     ] });
@@ -3521,63 +3556,51 @@ async function hotelCalcText(
     return true;
   }
 
-  const adults =
-    Number(d.adults || 0);
+  const adults = Number(d.adults || 0);
+  const infants = Number(d.infants || 0);
+  const child2to3 = Number(d.child2to3 || 0);
+  const child3to5 = Number(d.child3to5 || 0);
+  const child5to12 = Number(d.child5to12 || 0);
+  const children = Number(d.children ?? (child2to3 + child3to5 + child5to12));
+  const nights = Number(d.nights || 0);
 
-  const children =
-    Number(d.children || 0);
-
-  const nights =
-    Number(d.nights || 0);
-
-  /*
-   * بزرگسال ۱۰۰٪
-   */
-  const adultHotel =
-    adults *
-    nights *
-    price;
-
-  /*
-   * کودک ۵۰٪
-   */
-  const childHotel =
-    children *
-    nights *
-    price *
-    0.5;
-
-  const finalCost =
-    Math.round(
-      adultHotel +
-      childHotel
-    );
+  // هتل: زیر ۳ سال رایگان؛ ۳ تا کمتر از ۵ سال نیم‌بها؛ ۵ سال به بالا کامل.
+  const adultHotel = adults * price * nights;
+  const childHotelFree = (infants + child2to3) * 0;
+  const childHotelHalf = child3to5 * price * nights * 0.5;
+  const childHotelFull = child5to12 * price * nights;
+  // سازگاری با درخواست‌های قدیمی که سن کودک در payload ذخیره نشده است.
+  const knownAgeGroups = [d.child2to3, d.child3to5, d.child5to12].some(x => x !== undefined);
+  const legacyChildHotel = knownAgeGroups ? 0 : children * price * nights * 0.5;
+  const childHotel = childHotelFree + childHotelHalf + childHotelFull + legacyChildHotel;
+  const baseCost = Math.round(adultHotel + childHotel);
+  const paymentType = String(d.paymentType || "cash").toLowerCase();
+  const hotelPayingPersonEquivalents = adults + child5to12 + child3to5 * 0.5 + (knownAgeGroups ? 0 : children * 0.5);
+  const hotelProfit = paymentType === "loan"
+    ? hotelPayingPersonEquivalents * nights * 600000
+    : 0;
+  const finalCost = paymentType === "loan"
+    ? PRICING.roundCustomerAmount(baseCost + hotelProfit)
+    : baseCost;
+  let loanAmount = 0;
+  let customerCash = finalCost;
+  let loanEligible = true;
+  let loanIneligibleReason = "";
+  if (paymentType === "loan") {
+    try {
+      loanAmount = Math.min(finalCost, PRICING.getNarvanLoanAmount(finalCost, narvanOverLimitEnabledCache));
+      customerCash = Math.max(0, finalCost - loanAmount);
+    } catch (e) {
+      loanEligible = false;
+      loanIneligibleReason = e.message || "هزینه هتل مشمول وام طرح نارون نیست.";
+    }
+  }
 
   const result = {
-    type: "HOTEL",
-
-    hotelPricePerPersonPerNight:
-      price,
-
-    adults,
-
-    children,
-
-    nights,
-
-    adultHotel,
-
-    childHotel,
-
-    finalCost,
-
-    totalCost:
-      finalCost,
-
-    customerCash:
-      Math.ceil(
-        finalCost * 0.4
-      )
+    type: "HOTEL", hotelPricePerPersonPerNight: price, adults, infants, child2to3, child3to5, child5to12, children, nights,
+    adultHotel, childHotel, childHotelFree, childHotelHalf, childHotelFull, baseCost, hotelProfit, finalCost, totalCost: finalCost,
+    paymentType, loanAmount, customerCash, loanEligible, loanIneligibleReason,
+    hotelPayingPersonEquivalents
   };
 
   /*
@@ -3622,7 +3645,10 @@ async function hotelCalcText(
     `🏨 محاسبه رزرو فقط هتل
 ━━━━━━━━━━━━━━━━━━
 👨 بزرگسال: ${adults}
-👶 کودک: ${children}
+👶 نوزاد: ${infants}
+👧 کودک زیر ۳ سال: ${child2to3}
+👧 کودک ۳ تا کمتر از ۵ سال: ${child3to5}
+👦 کودک ۵ تا کمتر از ۱۲ سال: ${child5to12}
 🌙 تعداد شب: ${nights}
 
 💰 قیمت هتل هر نفر / هر شب:
@@ -3639,16 +3665,18 @@ ${money(childHotel)} تومان
 ${money(finalCost)} تومان
 `;
 
-  if (
-    d.paymentType ===
-    "loan"
-  ) {
+  if (d.paymentType === "loan") {
     out += `
-🌳 طرح نارون
+🌳 طرح نارون برای رزرو هتل
 
-💳 سهم نقدی ۷۰٪:
-${money(result.customerCash)} تومان
+🏨 سود هتل طرح نارون: ${money(result.hotelProfit)} تومان
 `;
+    if (result.loanEligible) {
+      const terms = PRICING.getNarvanRepayment(result.loanAmount);
+      out += `🌳 مبلغ وام: ${money(result.loanAmount)} تومان\n💵 پرداخت نقدی مشتری: ${money(result.customerCash)} تومان\n📈 سود ۴٪ کل دوره: ${money(terms.interest)} تومان\n💳 مجموع بازپرداخت وام: ${money(terms.repaymentTotal)} تومان\n📅 قسط ماهانه تقریبی در ۱۸ ماه: ${money(terms.monthlyInstallment)} تومان\n`;
+    } else {
+      out += `⚠️ ${result.loanIneligibleReason}\n💵 پرداخت نقدی کل: ${money(result.finalCost)} تومان\n`;
+    }
   }
 
   if (d.requestCode) {
@@ -3713,6 +3741,20 @@ async function handleMessage(
     String(
       message.text || ""
     ).trim();
+
+  // اگر مشتری شماره تماس را با کارت مخاطب بله بفرستد، فرم هم ادامه پیدا کند.
+  if (session?.state === "TOUR_PHONE" && message?.contact?.phone_number) {
+    const p = normalizePhone(message.contact.phone_number);
+    const d = session.data || {};
+    if (!validPhone(p)) {
+      await sendMessage(chatId, "❌ شماره تماس معتبر نیست. شماره را به شکل ۰۹۱۲۳۴۵۶۷۸۹ وارد کنید.", backKeyboard());
+    } else if (d.paymentType === "loan") {
+      await askNational(chatId, { ...d, phone: p });
+    } else {
+      await showConfirm(chatId, { ...d, phone: p });
+    }
+    return;
+  }
 
   /*
    * /start
@@ -4206,7 +4248,7 @@ async function handleCallback(
     const nextMonth = Math.max(1, Math.min(12, month + delta));
     const nextYear = Number(todayJalali().split("/")[0]);
     const ss = await getSession(chatId);
-    await showTourCalendar(chatId, mode, nextYear, nextMonth, ss?.data || {});
+    await showTourCalendar(chatId, mode, nextYear, nextMonth, ss?.data || {}, cb?.message?.message_id || null);
     return;
   }
   if (data.startsWith("TOUR_CAL_DAY_")) {
@@ -4222,11 +4264,13 @@ async function handleCallback(
     const ss = await getSession(chatId);
     const d = ss?.data || {};
     if (mode === "IN") {
-      await askTourOut(chatId, { ...d, departureDate: checked.normalized });
+      await askTourOut(chatId, { ...d, departureDate: checked.normalized }, cb?.message?.message_id || null);
       return;
     }
     if (!d.departureDate || jalaliToDay(checked.normalized) <= jalaliToDay(d.departureDate)) {
-      await sendMessage(chatId, "❌ تاریخ خروج باید بعد از تاریخ ورود باشد. لطفاً روز دیگری انتخاب کنید.", calendarKeyboard(year, month, "OUT", d.returnDate));
+      await editMessageText(chatId, cb?.message?.message_id, "❌ تاریخ خروج باید بعد از تاریخ ورود باشد. لطفاً روز دیگری انتخاب کنید.", calendarKeyboard(year, month, "OUT", d.returnDate)).catch(async () => {
+        await sendMessage(chatId, "❌ تاریخ خروج باید بعد از تاریخ ورود باشد. لطفاً روز دیگری انتخاب کنید.", calendarKeyboard(year, month, "OUT", d.returnDate));
+      });
       return;
     }
     await askNights(chatId, { ...d, returnDate: checked.normalized });
@@ -4721,9 +4765,11 @@ async function handleCallback(
           ),
 
         children:
-          Number(
-            p.children || 0
-          ),
+          Number(p.children || 0),
+        infants: Number(p.infants || 0),
+        child2to3: Number(p.child2to3 || 0),
+        child3to5: Number(p.child3to5 || 0),
+        child5to12: Number(p.child5to12 || 0),
 
         nights:
           Number(
@@ -4948,7 +4994,9 @@ async function handleCallback(
 
 ⭐ درجه: ${train.stars}
 🚆 نوع کوپه: ${berth}
-💰 قیمت بلیت یک‌طرفه: ${money(train.ticket)} تومان
+💰 بزرگسال هر مسیر: ${money(train.ticket)} تومان
+👧 کودک هر مسیر: ${money(train.childTicket ?? (train.ticket * Number(train.childTicketPercent || trainChildTicketPercentCache) / 100))} تومان
+👶 نوزاد هر مسیر: ${train.infantTicket ? money(train.infantTicket) + " تومان" : "رایگان"}
 
 🚆 وضعیت اجاره کوپه را انتخاب کنید:`,
       {
@@ -5162,6 +5210,7 @@ async function handleCallback(
 
           childTicketPercent:
             Number(d.childTicketPercent || trainChildTicketPercentCache),
+          useCustomChildPercent: Boolean(d.useCustomChildPercent),
 
           berthOption:
             d.berthOption ||

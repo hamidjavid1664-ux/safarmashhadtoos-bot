@@ -2436,9 +2436,10 @@ async function runFeedbackScheduler() {
     const r = await pool.query(`
       SELECT request_code, user_id, applicant_name, payload, status
       FROM requests
-      WHERE status IN ('receipt_received','passenger_received')
-        AND payload->>'returnDate' IS NOT NULL
+      WHERE status IN ('approved','receipt_received','passenger_received','completed','confirmed','paid')
+        AND COALESCE(payload->>'returnDate', payload->>'return_date', payload->>'checkoutDate') IS NOT NULL
         AND COALESCE(payload->>'feedbackInvited','false') <> 'true'
+        AND COALESCE(payload->>'feedbackCompleted','false') <> 'true'
     `);
 
     const today = todayJalali();
@@ -2446,10 +2447,18 @@ async function runFeedbackScheduler() {
 
     for (const req of r.rows) {
       const payload = req.payload || {};
-      const returnDate = normalizeDate(payload.returnDate);
-      if (!returnDate) continue;
+      let returnDate;
+      let returnDay;
+      try {
+        returnDate = normalizeDate(payload.returnDate || payload.return_date || payload.checkoutDate);
+        if (!returnDate) continue;
+        returnDay = jalaliToDay(returnDate);
+      } catch (dateError) {
+        console.error("❌ Feedback skipped: invalid return date for", req.request_code, dateError.message);
+        continue;
+      }
 
-      if (todayDay <= jalaliToDay(returnDate)) continue;
+      if (todayDay <= returnDay) continue;
 
       await pool.query(
         `UPDATE requests SET payload=payload || $2::jsonb, updated_at=NOW() WHERE request_code=$1`,
@@ -2457,12 +2466,16 @@ async function runFeedbackScheduler() {
       );
 
       try {
+        if (!req.user_id) throw new Error("برای درخواست شناسه کاربر ثبت نشده است.");
         await startFeedback(req);
       } catch (e) {
         console.error("❌ Feedback send error:", req.request_code, e.message);
+        const blocked = /bot was blocked by the user|bot was kicked|Forbidden/i.test(String(e.message || ""));
         await pool.query(
           `UPDATE requests SET payload=payload || $2::jsonb, updated_at=NOW() WHERE request_code=$1`,
-          [req.request_code, JSON.stringify({ feedbackInvited: false })]
+          [req.request_code, JSON.stringify(blocked
+            ? { feedbackInvited: true, feedbackDeliveryUnavailable: true }
+            : { feedbackInvited: false })]
         );
       }
     }
@@ -4505,7 +4518,20 @@ async function handleCallback(
     const session = await getSession(chatId);
     const feedbackItems = session?.data?.feedbackItems || BASE_FEEDBACK_ITEMS;
 
-    if (!session || session.state !== "FEEDBACK_RATING" || session.data?.requestCode !== code || index < 0 || index >= feedbackItems.length || rating < 1 || rating > 5) return;
+    if (!session || session.state !== "FEEDBACK_RATING" || session.data?.requestCode !== code || index < 0 || index >= feedbackItems.length || rating < 1 || rating > 5) {
+      // Instead of ignoring old/stale inline buttons, explain and restart from the request if possible.
+      const reqResult = await pool.query(
+        "SELECT request_code, user_id, applicant_name, payload, payment_type, status FROM requests WHERE request_code=$1 AND user_id=$2 LIMIT 1",
+        [code, String(chatId)]
+      );
+      if (reqResult.rows.length && !reqResult.rows[0].payload?.feedbackCompleted) {
+        await sendMessage(chatId, "🔄 نظرسنجی قبلی منقضی شده بود؛ از سؤال اول دوباره شروع می‌کنیم.");
+        await startFeedback(reqResult.rows[0]);
+      } else {
+        await sendMessage(chatId, "ℹ️ این دکمه مربوط به نظرسنجی فعال نیست. اگر نیاز دارید، از پشتیبانی سفر مشهد توس کمک بگیرید.");
+      }
+      return;
+    }
 
     const feedback = { ...(session.data.feedback || {}), [String(index)]: rating };
     const next = index + 1;

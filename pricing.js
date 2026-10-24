@@ -221,20 +221,27 @@ function calculateRailTour(data) {
   const fullHotelChildren = hasAgeGroups ? child5to12 : legacyChildren;
   const childHotelHalf = hotelPrice * 0.5 * nights;
   const childHotelFull = adultHotel;
-  const adultsTotal = (adultTrainNet + adultHotel) * adults;
-  const childTicketCost = childTrainNet * children;
+  const adultTicketTotal = adultTrainNet * adults;
+  const child2to3TicketTotal = childTrainNet * child2to3;
+  const child3to5TicketTotal = childTrainNet * child3to5;
+  const child5to12TicketTotal = childTrainNet * child5to12;
+  const childTicketCost = child2to3TicketTotal + child3to5TicketTotal + child5to12TicketTotal;
   const infantTicketCost = infantTrainNet * infants;
   const childHotelCost = halfHotelChildren * childHotelHalf + fullHotelChildren * childHotelFull;
-  // نرخ نوزاد برای سه قطار شیراز از نرخ‌های واقعی ارسال‌شده ثبت شده است؛ در قطارهای دیگر طبق قانون قبلی رایگان است.
+  const adultHotelTotal = adults * adultHotel;
+  const child2to3HotelTotal = 0;
+  const child3to5HotelTotal = halfHotelChildren * childHotelHalf;
+  const child5to12HotelTotal = fullHotelChildren * childHotelFull;
+  // نرخ نوزاد برای سه قطار شیراز از نرخ‌های واقعی ثبت شده است؛ هزینه صدور برای هر عضو جداگانه لحاظ می‌شود.
+  const adultsTotal = adultTicketTotal + adultHotelTotal;
   const childrenTotal = childTicketCost + childHotelCost + infantTicketCost;
   const netPurchaseTotal = adultsTotal + childrenTotal;
   const profitPerPerson = paymentType === "loan" ? SETTINGS.RAIL_LOAN_PROFIT : SETTINGS.RAIL_CASH_PROFIT;
   const totalProfit = profitPerPerson * totalPassengers;
-  // سود هتل در طرح نارون جدا از سود تور و بر اساس نفر-شبِ مشمول هزینه هتل است.
+  // در طرح نارون، سود تور و سود رزرو فقط هتل هرگز با هم جمع نمی‌شوند.
+  // این تابع فقط برای تور ریلی است؛ سود آن نفری ۵ میلیون و سود هتل صفر است.
   const hotelPayingPersonEquivalents = adults + child5to12 + (child3to5 * 0.5);
-  const hotelProfit = paymentType === "loan"
-    ? hotelPayingPersonEquivalents * nights * SETTINGS.NARVAN_HOTEL_PROFIT_PER_PERSON_PER_NIGHT
-    : 0;
+  const hotelProfit = 0;
   const finalPrice = roundCustomerAmount(netPurchaseTotal + totalProfit + hotelProfit);
   let customerCash = 0, loanAmount = 0, loanEligible = true, loanIneligibleReason = "";
   if (paymentType === "loan") {
@@ -242,8 +249,8 @@ function calculateRailTour(data) {
     catch (error) { if (finalPrice > 100000000) { loanEligible = false; loanIneligibleReason = "هزینه کل تور بیشتر از ۱۰۰ میلیون تومان است و مشمول وام طرح نارون نمی‌شود."; customerCash = finalPrice; } else throw error; }
   }
   return { route, trainKey, routeInfo: train, adults, infants, child2to3, child3to5, child5to12, children, totalPassengers, nights, hotelPrice, childTicketPercent, infantTicketPercent: Number(train.infantTicketPercent || 0), privateCompartment, compartmentPlan, privateCompartmentFee,
-    ticket: { oneWay: train.ticket, childOneWay: childTicketOneWay, infantOneWay: infantTicketOneWay, issueFeeOneWay: issueOneWay, adultRoundTrip, childRoundTrip, infantRoundTrip, adultTrainNet, childTrainNet, infantTrainNet, childTicketCost, infantTicketCost },
-    hotel: { adultHotel, childHotel: childHotelHalf, freeHotelChildren, halfHotelChildren, fullHotelChildren, childHotelCost, hotelCost: adults * adultHotel + childHotelCost },
+    ticket: { oneWay: train.ticket, childOneWay: childTicketOneWay, infantOneWay: infantTicketOneWay, issueFeeOneWay: issueOneWay, adultRoundTrip, childRoundTrip, infantRoundTrip, adultTrainNet, childTrainNet, infantTrainNet, adultTicketTotal, child2to3TicketTotal, child3to5TicketTotal, child5to12TicketTotal, childTicketCost, infantTicketCost },
+    hotel: { adultHotel, childHotel: childHotelHalf, freeHotelChildren, halfHotelChildren, fullHotelChildren, adultHotelTotal, child2to3HotelTotal, child3to5HotelTotal, child5to12HotelTotal, childHotelCost, hotelCost: adultHotelTotal + childHotelCost },
     adultsTotal, childrenTotal, infantTicketCost, netPurchaseTotal, profitPerPerson, totalProfit, hotelProfit, hotelPayingPersonEquivalents, finalPrice, paymentType, customerCash, loanAmount, loanEligible, loanIneligibleReason, allowNarvanOverLimit: Boolean(data.allowNarvanOverLimit),
     cashPercentActual: finalPrice ? (customerCash / finalPrice) * 100 : 0, loanPercentActual: finalPrice ? (loanAmount / finalPrice) * 100 : 0 };
 }
@@ -251,65 +258,47 @@ function calculateRailTour(data) {
 function formatRailCalculation(result) {
   const paymentTitle = result.paymentType === "loan" ? "🌳 وام طرح نارون" : "💵 نقدی";
   let text = "🧮 محاسبه داخلی تور ریلی\n\n";
-
-  text += `🚆 مسیر: ${result.routeInfo.name}\n`;
-  text += `🚃 قطار: ${result.routeInfo.train}\n`;
-  text += `⭐ ${result.routeInfo.stars}\n`;
-  text += `👨 بزرگسال: ${formatNumber(result.adults)} نفر\n`;
-  text += `👶 نوزاد زیر ۲ سال: ${formatNumber(result.infants || 0)} نفر\n`;
-  text += `👧 کودک ۲ تا زیر ۳ سال: ${formatNumber(result.child2to3 || 0)} نفر\n`;
-  text += `👧 کودک ۳ تا زیر ۵ سال: ${formatNumber(result.child3to5 || 0)} نفر\n`;
-  text += `👦 کودک ۵ تا کمتر از ۱۲ سال: ${formatNumber(result.child5to12 || 0)} نفر\n`;
-  text += `👥 مجموع: ${formatNumber(result.totalPassengers)} نفر\n`;
-  text += `🌙 اقامت: ${formatNumber(result.nights)} شب\n`;
-  text += `💳 پرداخت: ${paymentTitle}\n`;
-
+  text += `🚆 مسیر: ${result.routeInfo.name}\n🚃 قطار: ${result.routeInfo.train}\n⭐ ${result.routeInfo.stars}\n`;
+  text += `👨 بزرگسال: ${formatNumber(result.adults)} نفر\n👶 نوزاد زیر ۲ سال: ${formatNumber(result.infants || 0)} نفر\n`;
+  text += `👧 کودک ۲ تا زیر ۳ سال: ${formatNumber(result.child2to3 || 0)} نفر\n👧 کودک ۳ تا زیر ۵ سال: ${formatNumber(result.child3to5 || 0)} نفر\n`;
+  text += `👦 کودک ۵ تا کمتر از ۱۲ سال: ${formatNumber(result.child5to12 || 0)} نفر\n👥 مجموع: ${formatNumber(result.totalPassengers)} نفر\n🌙 اقامت: ${formatNumber(result.nights)} شب\n💳 پرداخت: ${paymentTitle}\n`;
   if (result.privateCompartment) {
-    text += `🛏️ کوپه اختصاصی: بله\n`;
-    text += `🪑 ظرفیت کوپه: ${formatNumber(result.routeInfo.capacity)} نفر\n`;
-    text += `🪑 تخت خالی: ${formatNumber(result.compartmentPlan.emptyBerths)} عدد\n`;
-    text += `💰 هزینه تخت‌های خالی: ${formatMoney(result.privateCompartmentFee)}\n`;
-  } else {
-    text += "🛏️ کوپه اختصاصی: خیر\n";
-  }
+    text += `🛏️ کوپه اختصاصی: بله\n🪑 ظرفیت کوپه: ${formatNumber(result.routeInfo.capacity)} نفر\n🪑 تخت خالی: ${formatNumber(result.compartmentPlan.emptyBerths)} عدد\n💰 هزینه تخت‌های خالی: ${formatMoney(result.privateCompartmentFee)}\n`;
+  } else text += "🛏️ کوپه اختصاصی: خیر\n";
 
-  text += "\n━━━━━━━━━━━━━━\n🚆 بلیت رفت و برگشت\n\n";
-  text += `🎫 بلیت بزرگسال + صدور: ${formatMoney(result.ticket.adultRoundTrip)}\n`;
-  text += `🎫 بلیت کودک ۲ تا کمتر از ۱۲ سال (حدود ${String(result.childTicketPercent).replace(".", "٫")}٪ نرخ بزرگسال): ${formatMoney(result.ticket.childRoundTrip)}\n`;
-  text += `👶 بلیت رفت‌وبرگشت هر نوزاد: ${result.ticket.infantRoundTrip > 0 ? formatMoney(result.ticket.infantRoundTrip) : "رایگان"}\n`;
-  if (result.infants > 0 && result.ticket.infantRoundTrip > 0) text += `👶 مجموع بلیت نوزادان: ${formatMoney(result.infantTicketCost)}\n`;
+  text += "\n━━━━━━━━━━━━━━\n🚆 بلیت رفت‌وبرگشت (قیمت هر نفر × تعداد = مجموع)\n\n";
+  text += `👨 بزرگسال: ${formatMoney(result.ticket.adultTrainNet)} × ${formatNumber(result.adults)} = ${formatMoney(result.ticket.adultTicketTotal)}\n`;
+  text += `👧 کودک ۲ تا زیر ۳ سال: ${formatMoney(result.ticket.childTrainNet)} × ${formatNumber(result.child2to3)} = ${formatMoney(result.ticket.child2to3TicketTotal)}\n`;
+  text += `👧 کودک ۳ تا زیر ۵ سال: ${formatMoney(result.ticket.childTrainNet)} × ${formatNumber(result.child3to5)} = ${formatMoney(result.ticket.child3to5TicketTotal)}\n`;
+  text += `👦 کودک ۵ تا زیر ۱۲ سال: ${formatMoney(result.ticket.childTrainNet)} × ${formatNumber(result.child5to12)} = ${formatMoney(result.ticket.child5to12TicketTotal)}\n`;
+  text += `👶 نوزاد زیر ۲ سال: ${formatMoney(result.ticket.infantTrainNet)} × ${formatNumber(result.infants)} = ${formatMoney(result.infantTicketCost)}\n`;
+  text += `ℹ️ هزینه صدور بلیت: ${formatMoney(result.ticket.issueFeeOneWay)} برای هر نفر در هر مسیر؛ ${formatMoney(result.ticket.issueFeeOneWay * 2)} برای رفت‌وبرگشت هر نفر (داخل نرخ‌های بالا لحاظ شده)\n`;
+  text += `💰 جمع کل بلیت‌ها: ${formatMoney(result.ticket.adultTicketTotal + result.ticket.childTicketCost + result.ticket.infantTicketCost)}\n`;
 
-  text += "\n━━━━━━━━━━━━━━\n🏨 هتل\n\n";
-  text += `🏨 نرخ بزرگسال هر شب: ${formatMoney(result.hotelPrice)}\n`;
-  text += `🏨 هزینه هتل بزرگسالان: ${formatMoney(result.adults * result.hotel.adultHotel)}\n`;
-  text += `🏨 هزینه هتل زیر ۳ سال: رایگان\n`;
-  text += `🏨 هزینه هتل ۳ تا زیر ۵ سال: ${formatMoney((result.child3to5 || 0) * (result.hotel.childHotel || 0))}\n`;
-  text += `🏨 هزینه هتل ۵ تا کمتر از ۱۲ سال: ${formatMoney((result.child5to12 || 0) * result.hotel.adultHotel)}\n`;
-  text += `💰 مجموع هزینه هتل برای کل اقامت: ${formatMoney(result.hotel.hotelCost)}\n`;
-
-  text += "\n━━━━━━━━━━━━━━\n💰 هزینه تمام‌شده\n\n";
-  text += `💰 نت خرید کل: ${formatMoney(result.netPurchaseTotal)}\n`;
-  text += `📈 سود هر نفر: ${formatMoney(result.profitPerPerson)}\n`;
-  text += `📈 سود کل: ${formatMoney(result.totalProfit)}\n`;
-  text += `💰 قیمت نهایی فروش: ${formatMoney(result.finalPrice)}\n`;
+  text += "\n━━━━━━━━━━━━━━\n🏨 هتل (نرخ هر نفر در هر شب × شب‌ها × تعداد = مجموع)\n\n";
+  text += `👨 بزرگسال: ${formatMoney(result.hotelPrice)} × ${formatNumber(result.nights)} شب × ${formatNumber(result.adults)} نفر = ${formatMoney(result.hotel.adultHotelTotal)}\n`;
+  text += `👶/👧 زیر ۳ سال: رایگان × ${formatNumber(result.nights)} شب × ${formatNumber(result.infants + result.child2to3)} نفر = ${formatMoney(result.hotel.child2to3HotelTotal)}\n`;
+  text += `👧 کودک ۳ تا زیر ۵ سال: ${formatMoney(result.hotelPrice * 0.5)} × ${formatNumber(result.nights)} شب × ${formatNumber(result.child3to5)} نفر = ${formatMoney(result.hotel.child3to5HotelTotal)}\n`;
+  text += `👦 کودک ۵ تا زیر ۱۲ سال: ${formatMoney(result.hotelPrice)} × ${formatNumber(result.nights)} شب × ${formatNumber(result.child5to12)} نفر = ${formatMoney(result.hotel.child5to12HotelTotal)}\n`;
+  text += `💰 جمع کل هتل: ${formatMoney(result.hotel.hotelCost)}\n`;
+  text += "\n━━━━━━━━━━━━━━\n💰 جمع‌بندی هزینه و سود\n\n";
+  text += `🚆 جمع کل بلیت‌ها: ${formatMoney(result.ticket.adultTicketTotal + result.ticket.childTicketCost + result.ticket.infantTicketCost)}\n`;
+  text += `🏨 جمع کل هتل: ${formatMoney(result.hotel.hotelCost)}\n`;
+  if (result.privateCompartmentFee > 0) text += `🛏️ تخت‌های خالی کوپه: ${formatMoney(result.privateCompartmentFee)}\n`;
+  text += `💰 نت خرید کل: ${formatMoney(result.netPurchaseTotal)}\n📈 سود هر نفر: ${formatMoney(result.profitPerPerson)}\n📈 سود کل: ${formatMoney(result.totalProfit)}\n`;
+  text += `🏨 سود جداگانه هتل: ${formatMoney(result.hotelProfit)} (برای تور نارون اضافه نمی‌شود)\n💰 قیمت نهایی فروش: ${formatMoney(result.finalPrice)}\n`;
 
   if (result.paymentType === "loan") {
     text += "\n━━━━━━━━━━━━━━\n🌳 محاسبات وام طرح نارون\n\n";
     text += `💵 هزینه کل تور: ${formatMoney(result.finalPrice)}\n`;
     if (result.loanEligible === false) {
-      text += `⚠️ ${result.loanIneligibleReason || "این هزینه مشمول وام طرح نارون نمی‌شود."}\n`;
-      text += `💵 در صورت ادامه بدون وام، مبلغ کل پرداختی نقدی: ${formatMoney(result.finalPrice)}\n`;
+      text += `⚠️ ${result.loanIneligibleReason || "این هزینه مشمول وام طرح نارون نمی‌شود."}\n💵 مبلغ پرداخت نقدی: ${formatMoney(result.finalPrice)}\n`;
     } else {
-      text += `🌳 مبلغ وام طرح نارون: ${formatMoney(result.loanAmount)}\n`;
-      if (result.finalPrice > 100000000 && result.allowNarvanOverLimit) text += "🔓 محاسبه با اجازه مدیر برای مبلغ بالای ۱۰۰ میلیون تومان انجام شد.\n";
-      text += `💰 مبلغ پرداختی مشتری: ${formatMoney(result.customerCash)}\n`;
+      text += `🌳 مبلغ وام طرح نارون: ${formatMoney(result.loanAmount)}\n💰 مبلغ پرداختی مشتری: ${formatMoney(result.customerCash)}\n`;
       const { interest, repaymentTotal, monthlyInstallment } = getNarvanRepayment(result.loanAmount);
-      text += `📈 سود ۴٪ کل دوره: ${formatMoney(interest)}\n`;
-      text += `💳 مجموع بازپرداخت وام: ${formatMoney(repaymentTotal)}\n`;
-      text += `📅 قسط ماهانه تقریبی در ۱۸ ماه: ${formatMoney(monthlyInstallment)}\n`;
+      text += `📈 سود ۴٪ کل دوره: ${formatMoney(interest)}\n💳 مجموع بازپرداخت وام: ${formatMoney(repaymentTotal)}\n📅 قسط ماهانه تقریبی در ۱۸ ماه: ${formatMoney(monthlyInstallment)}\n`;
     }
   }
-
   return text;
 }
 
@@ -356,15 +345,18 @@ function calculateManualTour(data) {
   let profitPerPerson = manualProfit;
   if (paymentType === "loan" && type !== "HOTEL") {
     profitPerPerson = SETTINGS.NARVAN_TOUR_PROFIT_PER_PERSON;
+  } else if (type === "HOTEL") {
+    profitPerPerson = 0;
   } else if (data.manualProfit === undefined || data.manualProfit === null || data.manualProfit === "") {
     if (type === "AIR") profitPerPerson = SETTINGS.AIR_CASH_PROFIT;
     else if (type === "RAIL") profitPerPerson = SETTINGS.RAIL_CASH_PROFIT;
   }
   const totalProfit = profitPerPerson * totalPassengers;
-  // سود هتل نارون: ۶۰۰ هزار تومان برای هر نفرِ مشمول هزینه هتل در هر شب.
-  const hotelPayingPersonEquivalents = adults + fullChildren + (legacyHalfChildren * 0.5);
-  const hotelProfit = paymentType === "loan"
-    ? hotelPayingPersonEquivalents * nights * SETTINGS.NARVAN_HOTEL_PROFIT_PER_PERSON_PER_NIGHT
+  // سود نارون فقط‌هتل: ۶۰۰ هزار تومان برای هر نفرِ مشمول هزینه هتل در هر شب.
+  // در تورهای هوایی/ریلی/اتوبوسی سود هتل جداگانه اضافه نمی‌شود.
+  const hotelPayingPersonEquivalents = totalPassengers;
+  const hotelProfit = paymentType === "loan" && type === "HOTEL"
+    ? totalPassengers * nights * SETTINGS.NARVAN_HOTEL_PROFIT_PER_PERSON_PER_NIGHT
     : 0;
   const finalPrice = roundCustomerAmount(netPurchaseTotal + totalProfit + hotelProfit);
   let customerCash = 0, loanAmount = 0, loanEligible = true, loanIneligibleReason = "";
@@ -379,82 +371,40 @@ function calculateManualTour(data) {
 }
 
 function formatManualCalculation(result) {
-  const names = {
-    AIR: "✈️ تور هوایی",
-    RAIL: "🚆 تور ریلی",
-    BUS: "🚌 تور اتوبوسی",
-    CARAVAN_BUS: "🚍 کاروان اتوبوسی",
-    CARAVAN_RAIL: "🚆 کاروان ریلی",
-    HOTEL: "🏨 فقط هتل"
-  };
-
+  const names = { AIR: "✈️ تور هوایی", RAIL: "🚆 تور ریلی", BUS: "🚌 تور اتوبوسی", CARAVAN_BUS: "🚍 کاروان اتوبوسی", CARAVAN_RAIL: "🚆 کاروان ریلی", HOTEL: "🏨 فقط هتل" };
   let text = "🧮 محاسبه داخلی مدیر\n\n";
-  text += `🚍 نوع سفر: ${names[result.type] || result.type}\n`;
-  text += `👨 بزرگسال: ${formatNumber(result.adults)} نفر\n`;
-  text += `👶 نوزاد زیر ۲ سال: ${formatNumber(result.infants || 0)} نفر\n`;
-  text += `👧 کودک ۲ تا زیر ۳ سال: ${formatNumber(result.child2to3 || 0)} نفر\n`;
-  text += `👧 کودک ۳ تا زیر ۵ سال: ${formatNumber(result.child3to5 || 0)} نفر\n`;
-  text += `👦 کودک ۵ تا کمتر از ۱۲ سال: ${formatNumber(result.child5to12 || 0)} نفر\n`;
-  text += `👥 مجموع: ${formatNumber(result.totalPassengers)} نفر\n`;
-  text += `🌙 اقامت: ${formatNumber(result.nights)} شب\n\n`;
-  text += "━━━━━━━━━━━━━━\n💰 هزینه‌ها\n\n";
-  if (result.type === "AIR") {
-    text += `✈️ بلیت بزرگسال - رفت: ${formatMoney(result.ticketAdultOutbound)}
-`;
-    text += `✈️ بلیت بزرگسال - برگشت: ${formatMoney(result.ticketAdultReturn)}
-`;
-    text += `🎫 مجموع بلیت رفت‌وبرگشت هر بزرگسال: ${formatMoney(result.ticketAdult)}
-`;
-    text += `👶 بلیت کودک - رفت: ${formatMoney(result.ticketChildOutbound)}
-`;
-    text += `👶 بلیت کودک - برگشت: ${formatMoney(result.ticketChildReturn)}
-`;
-    text += `🎫 مجموع بلیت رفت‌وبرگشت هر کودک: ${formatMoney(result.childTicket)}
-`;
-    text += `👶 بلیت نوزاد - رفت: ${formatMoney(result.ticketInfantOutbound || 0)}
-`;
-    text += `👶 بلیت نوزاد - برگشت: ${formatMoney(result.ticketInfantReturn || 0)}
-`;
-    text += `🎫 مجموع بلیت رفت‌وبرگشت هر نوزاد: ${formatMoney(result.infantTicket || 0)}
-`;
-    text += `💰 مجموع بلیت بزرگسالان: ${formatMoney(result.adultTicketTotal)}
-`;
-    text += `💰 مجموع بلیت نوزادان: ${formatMoney(result.infantTicketTotal || 0)}
-`;
-    text += `💰 مجموع بلیت کودکان: ${formatMoney(result.childTicketTotal)}
-`;
-  } else {
-    text += `🎫 بلیت هر بزرگسال: ${formatMoney(result.ticketAdult)}
-`;
-    text += `🎫 بلیت هر کودک: ${formatMoney(result.childTicket)}
-`;
-  }
-  text += `🏨 هتل هر بزرگسال/شب: ${formatMoney(result.hotelAdult)}\n`;
-  text += `🏨 هتل کودک زیر ۳ سال: رایگان\n`;
-  text += `🏨 هتل کودک ۳ تا زیر ۵ سال/شب: ${formatMoney(result.hotelAdult * 0.5)}\n`;
-  text += `🏨 هتل کودک ۵ سال به بالا/شب: ${formatMoney(result.hotelAdult)}\n`;
-  text += `💰 مجموع هزینه هتل برای ${formatNumber(result.nights)} شب: ${formatMoney(result.hotelTotal)}\n`;
+  text += `🚍 نوع سفر: ${names[result.type] || result.type}\n👨 بزرگسال: ${formatNumber(result.adults)} نفر\n👶 نوزاد زیر ۲ سال: ${formatNumber(result.infants || 0)} نفر\n👧 کودک ۲ تا زیر ۳ سال: ${formatNumber(result.child2to3 || 0)} نفر\n👧 کودک ۳ تا زیر ۵ سال: ${formatNumber(result.child3to5 || 0)} نفر\n👦 کودک ۵ تا کمتر از ۱۲ سال: ${formatNumber(result.child5to12 || 0)} نفر\n👥 مجموع: ${formatNumber(result.totalPassengers)} نفر\n🌙 اقامت: ${formatNumber(result.nights)} شب\n`;
+  text += "\n━━━━━━━━━━━━━━\n🎫 بلیت‌ها (قیمت هر نفر × تعداد = مجموع)\n\n";
+  text += `👨 بزرگسال: ${formatMoney(result.ticketAdult)} × ${formatNumber(result.adults)} = ${formatMoney(result.adultTicketTotal)}\n`;
+  text += `👧 کودک ۲ تا زیر ۳ سال: ${formatMoney(result.childTicket)} × ${formatNumber(result.child2to3 || 0)} = ${formatMoney(result.childTicket * (result.child2to3 || 0))}\n`;
+  text += `👧 کودک ۳ تا زیر ۵ سال: ${formatMoney(result.childTicket)} × ${formatNumber(result.child3to5 || 0)} = ${formatMoney(result.childTicket * (result.child3to5 || 0))}\n`;
+  text += `👦 کودک ۵ تا زیر ۱۲ سال: ${formatMoney(result.childTicket)} × ${formatNumber(result.child5to12 || 0)} = ${formatMoney(result.childTicket * (result.child5to12 || 0))}\n`;
+  text += `👶 نوزاد: ${formatMoney(result.infantTicket || 0)} × ${formatNumber(result.infants || 0)} = ${formatMoney(result.infantTicketTotal || 0)}\n`;
+  text += `💰 جمع کل بلیت‌ها: ${formatMoney(result.ticketTotal)}\n`;
+  text += "\n━━━━━━━━━━━━━━\n🏨 هتل (نرخ هر نفر در هر شب × شب‌ها × تعداد = مجموع)\n\n";
+  text += `👨 بزرگسال: ${formatMoney(result.hotelAdult)} × ${formatNumber(result.nights)} شب × ${formatNumber(result.adults)} نفر = ${formatMoney(result.adults * result.hotelAdult * result.nights)}\n`;
+  text += `👶/👧 زیر ۳ سال: رایگان × ${formatNumber(result.nights)} شب × ${formatNumber((result.infants || 0) + (result.child2to3 || 0))} نفر = ${formatMoney(0)}\n`;
+  text += `👧 کودک ۳ تا زیر ۵ سال: ${formatMoney(result.childHotel)} × ${formatNumber(result.nights)} شب × ${formatNumber(result.child3to5 || 0)} نفر = ${formatMoney((result.child3to5 || 0) * result.childHotel * result.nights)}\n`;
+  text += `👦 کودک ۵ تا زیر ۱۲ سال: ${formatMoney(result.hotelAdult)} × ${formatNumber(result.nights)} شب × ${formatNumber(result.child5to12 || 0)} نفر = ${formatMoney((result.child5to12 || 0) * result.hotelAdult * result.nights)}\n`;
+  text += `💰 جمع کل هتل: ${formatMoney(result.hotelTotal)}\n`;
   if (result.busRental > 0) text += `🚌 اجاره اتوبوس: ${formatMoney(result.busRental)}\n`;
-  text += `\n💰 نت خرید کل: ${formatMoney(result.netPurchaseTotal)}\n`;
-  text += "\n━━━━━━━━━━━━━━\n📈 سود فروش\n\n";
-  text += `💵 سود هر نفر: ${formatMoney(result.profitPerPerson)}\n`;
-  text += `📈 سود کل تور: ${formatMoney(result.totalProfit)}\n`;
-  if (result.hotelProfit > 0) text += `🏨 سود هتل (${formatNumber(result.hotelPayingPersonEquivalents)} نفرِ مشمول × ${formatNumber(result.nights)} شب): ${formatMoney(result.hotelProfit)}\n`;
+  text += `\n━━━━━━━━━━━━━━\n💰 جمع‌بندی\n\n🎫 جمع کل بلیت‌ها: ${formatMoney(result.ticketTotal)}\n🏨 جمع کل هتل: ${formatMoney(result.hotelTotal)}\n`;
+  if (result.busRental > 0) text += `🚌 سایر هزینه‌ها: ${formatMoney(result.busRental)}\n`;
+  text += `💰 نت خرید کل: ${formatMoney(result.netPurchaseTotal)}\n📈 سود هر نفر: ${formatMoney(result.profitPerPerson)}\n📈 سود کل: ${formatMoney(result.totalProfit)}\n`;
+  if (result.type === "HOTEL" && result.paymentType === "loan") {
+    text += `🏨 سود فقط هتل: ${formatMoney(SETTINGS.NARVAN_HOTEL_PROFIT_PER_PERSON_PER_NIGHT)} × ${formatNumber(result.nights)} شب × ${formatNumber(result.totalPassengers)} نفر = ${formatMoney(result.hotelProfit)}\n`;
+  } else {
+    text += `🏨 سود هتل جداگانه: ${formatMoney(result.hotelProfit)} (برای تور اضافه نمی‌شود)\n`;
+  }
   text += `💰 قیمت نهایی: ${formatMoney(result.finalPrice)}\n`;
   if (result.paymentType === "loan") {
     text += "\n━━━━━━━━━━━━━━\n🌳 محاسبات وام طرح نارون\n\n";
     text += `💵 هزینه کل تور: ${formatMoney(result.finalPrice)}\n`;
-    if (result.loanEligible === false) {
-      text += `⚠️ ${result.loanIneligibleReason || "این هزینه مشمول وام طرح نارون نمی‌شود."}\n`;
-      text += `💵 در صورت ادامه بدون وام، مبلغ کل پرداختی نقدی: ${formatMoney(result.finalPrice)}\n`;
-    } else {
-      text += `🌳 مبلغ وام طرح نارون: ${formatMoney(result.loanAmount)}\n`;
-      if (result.finalPrice > 100000000 && result.allowNarvanOverLimit) text += "🔓 محاسبه با اجازه مدیر برای مبلغ بالای ۱۰۰ میلیون تومان انجام شد.\n";
-      text += `💰 مبلغ پرداختی مشتری: ${formatMoney(result.customerCash)}\n`;
+    if (result.loanEligible === false) text += `⚠️ ${result.loanIneligibleReason || "این هزینه مشمول وام طرح نارون نمی‌شود."}\n💵 مبلغ پرداخت نقدی: ${formatMoney(result.finalPrice)}\n`;
+    else {
+      text += `🌳 مبلغ وام طرح نارون: ${formatMoney(result.loanAmount)}\n💰 مبلغ پرداختی مشتری: ${formatMoney(result.customerCash)}\n`;
       const { interest, repaymentTotal, monthlyInstallment } = getNarvanRepayment(result.loanAmount);
-      text += `📈 سود ۴٪ کل دوره: ${formatMoney(interest)}\n`;
-      text += `💳 مجموع بازپرداخت وام: ${formatMoney(repaymentTotal)}\n`;
-      text += `📅 قسط ماهانه تقریبی در ۱۸ ماه: ${formatMoney(monthlyInstallment)}\n`;
+      text += `📈 سود ۴٪ کل دوره: ${formatMoney(interest)}\n💳 مجموع بازپرداخت وام: ${formatMoney(repaymentTotal)}\n📅 قسط ماهانه تقریبی در ۱۸ ماه: ${formatMoney(monthlyInstallment)}\n`;
     }
   }
   return text;

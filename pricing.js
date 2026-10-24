@@ -6,8 +6,8 @@
 const SETTINGS = {
   HOTEL_PRICE_PER_NIGHT: 2300000,
   HOTEL_CHILD_PERCENT: 50,
-  TICKET_ISSUE_FEE_ONE_WAY: 100000, // مجموع صدور رفت‌وبرگشت هر نفر: ۲۰۰ هزار تومان
-  TRAIN_CHILD_TICKET_PERCENT: 75,
+  TICKET_ISSUE_FEE_ONE_WAY: 200000,
+  TRAIN_CHILD_TICKET_PERCENT: 60,
   EMPTY_BERTH_FEE: 800000,
   RAIL_NIGHTS: 4,
   RAIL_CASH_PROFIT: 3000000,
@@ -194,14 +194,15 @@ function calculateRailTour(data) {
   if (train.route !== route) throw new Error("قطار انتخاب‌شده با مسیر هماهنگ نیست.");
   const issueOneWay = SETTINGS.TICKET_ISSUE_FEE_ONE_WAY;
   const adultRoundTrip = (train.ticket + issueOneWay) * 2;
-  // قانون یکسان برای تمام قطارها: کودک ۷۵٪ و نوزاد ۷٪ قیمت بزرگسال.
-  // مبلغ‌های childTicket / infantTicket ذخیره‌شده در مشخصات قطار نادیده گرفته می‌شوند
-  // تا برای همه قطارها قانون درصدی مورد تأیید مدیر اعمال شود.
-  const childTicketPercent = 75;
-  const childTicketOneWay = train.ticket * 0.75;
+  const childTicketPercent = data.useCustomChildPercent
+    ? requestedChildPercent
+    : Number(train.childTicketPercent ?? requestedChildPercent);
+  const childTicketOneWay = data.useCustomChildPercent
+    ? train.ticket * requestedChildPercent / 100
+    : (train.childTicket !== undefined ? train.childTicket : train.ticket * childTicketPercent / 100);
   const childRoundTrip = (childTicketOneWay + issueOneWay) * 2;
-  const infantTicketOneWay = train.ticket * 0.07;
-  const infantRoundTrip = (infantTicketOneWay + issueOneWay) * 2;
+  const infantTicketOneWay = Math.max(0, toNumber(train.infantTicket));
+  const infantRoundTrip = infantTicketOneWay > 0 ? (infantTicketOneWay + issueOneWay) * 2 : 0;
   let adultTrainNet = adultRoundTrip, childTrainNet = childRoundTrip, infantTrainNet = infantRoundTrip, privateCompartmentFee = 0, compartmentPlan = null;
   if (privateCompartment) {
     if (totalPassengers !== 3 && totalPassengers !== 5) throw new Error("اجاره کوپه اختصاصی طبق فرمول فعلی فقط برای ۳ یا ۵ نفر فعال است.");
@@ -349,12 +350,14 @@ function calculateManualTour(data) {
   const ticketTotal = adultTicketTotal + childTicketTotal + infantTicketTotal;
   const hotelTotal = nights * (adults * hotelAdult + legacyHalfChildren * hotelAdult * 0.5 + fullChildren * hotelAdult);
   const netPurchaseTotal = ticketTotal + hotelTotal + busRental;
-  // اگر مدیر سود را صریح وارد کرده باشد، همان مبلغ باید اعمال شود؛
-  // در غیر این صورت از سود پیش‌فرض همان نوع تور استفاده می‌کنیم.
+  // قانون ثابت نارون: سود تور برای هر نفر دقیقاً ۵ میلیون تومان است؛
+  // این مبلغ به نسبت‌های ۷۰/۳۰ وابسته نیست و ورودی دستی نمی‌تواند آن را تغییر دهد.
   let profitPerPerson = manualProfit;
-  if (data.manualProfit === undefined || data.manualProfit === null || data.manualProfit === "") {
-    if (type === "AIR") profitPerPerson = paymentType === "loan" ? SETTINGS.AIR_LOAN_PROFIT : SETTINGS.AIR_CASH_PROFIT;
-    else if (type === "RAIL") profitPerPerson = paymentType === "loan" ? SETTINGS.RAIL_LOAN_PROFIT : SETTINGS.RAIL_CASH_PROFIT;
+  if (paymentType === "loan" && type !== "HOTEL") {
+    profitPerPerson = SETTINGS.NARVAN_TOUR_PROFIT_PER_PERSON;
+  } else if (data.manualProfit === undefined || data.manualProfit === null || data.manualProfit === "") {
+    if (type === "AIR") profitPerPerson = SETTINGS.AIR_CASH_PROFIT;
+    else if (type === "RAIL") profitPerPerson = SETTINGS.RAIL_CASH_PROFIT;
   }
   const totalProfit = profitPerPerson * totalPassengers;
   // سود هتل نارون: ۶۰۰ هزار تومان برای هر نفرِ مشمول هزینه هتل در هر شب.

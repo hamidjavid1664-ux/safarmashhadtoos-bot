@@ -55,7 +55,12 @@ const RAIL_TRAINS = {
     stars: "۴ ستاره، ۴ تخته",
     capacity: 4,
     berth: "۴ تخته",
-    ticket: 2010000
+    // نرخ تخفیف‌خورده یک‌طرفه، تومان؛ نرخ کودک و نوزاد از تصویر فروش بلیت
+    ticket: 2417900,
+    childTicket: 1603600,
+    infantTicket: 275150,
+    childTicketPercent: 66.29,
+    infantTicketPercent: 11.38
   },
   SHIRAZ_4_AHOO: {
     route: "SHIRAZ",
@@ -64,7 +69,26 @@ const RAIL_TRAINS = {
     stars: "۴ ستاره، ۴ تخته",
     capacity: 4,
     berth: "۴ تخته",
-    ticket: 2990000
+    // بزرگسال از نرخ تخفیف‌خورده؛ کودک ۷۵٪ و نوزاد ۷٪
+    ticket: 3591300,
+    childTicket: 2693475,
+    infantTicket: 251391,
+    childTicketPercent: 75,
+    infantTicketPercent: 7
+  },
+  SHIRAZ_5_TORANJ: {
+    route: "SHIRAZ",
+    name: "شیراز ↔ مشهد",
+    train: "ترنج / رجا",
+    stars: "۵ ستاره، ۴ تخته",
+    capacity: 4,
+    berth: "۴ تخته",
+    // نرخ تخفیف‌خورده یک‌طرفه، تومان؛ درصدهای مشاهده‌شده حدود ۷۴٫۶۶٪ و ۶٫۸٪ هستند
+    ticket: 6120400,
+    childTicket: 4569200,
+    infantTicket: 416400,
+    childTicketPercent: 74.66,
+    infantTicketPercent: 6.8
   }
 };
 
@@ -157,7 +181,7 @@ function calculateRailTour(data) {
   const totalPassengers = adults + infants + children;
   const nights = Math.floor(toNumber(data.nights || SETTINGS.RAIL_NIGHTS));
   const hotelPrice = toNumber(data.hotelPricePerPersonPerNight || data.hotelPrice || SETTINGS.HOTEL_PRICE_PER_NIGHT);
-  const childTicketPercent = Math.min(100, Math.max(0, toNumber(data.childTicketPercent ?? SETTINGS.TRAIN_CHILD_TICKET_PERCENT)));
+  const requestedChildPercent = Math.min(100, Math.max(0, toNumber(data.childTicketPercent ?? SETTINGS.TRAIN_CHILD_TICKET_PERCENT)));
   const paymentType = data.paymentType === "loan" ? "loan" : "cash";
   const privateCompartment = Boolean(data.privateCompartment);
   if (adults <= 0) throw new Error("تعداد بزرگسال باید حداقل ۱ نفر باشد.");
@@ -170,17 +194,24 @@ function calculateRailTour(data) {
   if (train.route !== route) throw new Error("قطار انتخاب‌شده با مسیر هماهنگ نیست.");
   const issueOneWay = SETTINGS.TICKET_ISSUE_FEE_ONE_WAY;
   const adultRoundTrip = (train.ticket + issueOneWay) * 2;
-  const childTicketOneWay = train.ticket * childTicketPercent / 100;
+  const childTicketPercent = data.useCustomChildPercent
+    ? requestedChildPercent
+    : Number(train.childTicketPercent ?? requestedChildPercent);
+  const childTicketOneWay = data.useCustomChildPercent
+    ? train.ticket * requestedChildPercent / 100
+    : (train.childTicket !== undefined ? train.childTicket : train.ticket * childTicketPercent / 100);
   const childRoundTrip = (childTicketOneWay + issueOneWay) * 2;
-  let adultTrainNet = adultRoundTrip, childTrainNet = childRoundTrip, privateCompartmentFee = 0, compartmentPlan = null;
+  const infantTicketOneWay = Math.max(0, toNumber(train.infantTicket));
+  const infantRoundTrip = infantTicketOneWay > 0 ? (infantTicketOneWay + issueOneWay) * 2 : 0;
+  let adultTrainNet = adultRoundTrip, childTrainNet = childRoundTrip, infantTrainNet = infantRoundTrip, privateCompartmentFee = 0, compartmentPlan = null;
   if (privateCompartment) {
     if (totalPassengers !== 3 && totalPassengers !== 5) throw new Error("اجاره کوپه اختصاصی طبق فرمول فعلی فقط برای ۳ یا ۵ نفر فعال است.");
     compartmentPlan = getCompartmentPlan(totalPassengers, train.capacity);
     privateCompartmentFee = SETTINGS.EMPTY_BERTH_FEE * compartmentPlan.emptyBerths;
-    const baseRoundTripPerPerson = (train.ticket + issueOneWay) * 2;
     const extraPerPerson = privateCompartmentFee / totalPassengers;
-    adultTrainNet = baseRoundTripPerPerson + extraPerPerson;
-    childTrainNet = baseRoundTripPerPerson + extraPerPerson;
+    adultTrainNet = adultRoundTrip + extraPerPerson;
+    childTrainNet = childRoundTrip + extraPerPerson;
+    infantTrainNet = infantRoundTrip + extraPerPerson;
   }
   // هتل: زیر ۳ سال رایگان؛ ۳ تا زیر ۵ سال نیم‌بها؛ ۵ سال به بالا کامل.
   const adultHotel = hotelPrice * nights;
@@ -191,8 +222,10 @@ function calculateRailTour(data) {
   const childHotelFull = adultHotel;
   const adultsTotal = (adultTrainNet + adultHotel) * adults;
   const childTicketCost = childTrainNet * children;
+  const infantTicketCost = infantTrainNet * infants;
   const childHotelCost = halfHotelChildren * childHotelHalf + fullHotelChildren * childHotelFull;
-  const childrenTotal = childTicketCost + childHotelCost;
+  // نرخ نوزاد برای سه قطار شیراز از نرخ‌های واقعی ارسال‌شده ثبت شده است؛ در قطارهای دیگر طبق قانون قبلی رایگان است.
+  const childrenTotal = childTicketCost + childHotelCost + infantTicketCost;
   const netPurchaseTotal = adultsTotal + childrenTotal;
   const profitPerPerson = paymentType === "loan" ? SETTINGS.RAIL_LOAN_PROFIT : SETTINGS.RAIL_CASH_PROFIT;
   const totalProfit = profitPerPerson * totalPassengers;
@@ -207,10 +240,10 @@ function calculateRailTour(data) {
     try { loanAmount = getNarvanLoanAmount(finalPrice, Boolean(data.allowNarvanOverLimit)); customerCash = Math.max(0, finalPrice - loanAmount); }
     catch (error) { if (finalPrice > 100000000) { loanEligible = false; loanIneligibleReason = "هزینه کل تور بیشتر از ۱۰۰ میلیون تومان است و مشمول وام طرح نارون نمی‌شود."; customerCash = finalPrice; } else throw error; }
   }
-  return { route, trainKey, routeInfo: train, adults, infants, child2to3, child3to5, child5to12, children, totalPassengers, nights, hotelPrice, childTicketPercent, privateCompartment, compartmentPlan, privateCompartmentFee,
-    ticket: { oneWay: train.ticket, issueFeeOneWay: issueOneWay, adultRoundTrip, childRoundTrip, adultTrainNet, childTrainNet },
+  return { route, trainKey, routeInfo: train, adults, infants, child2to3, child3to5, child5to12, children, totalPassengers, nights, hotelPrice, childTicketPercent, infantTicketPercent: Number(train.infantTicketPercent || 0), privateCompartment, compartmentPlan, privateCompartmentFee,
+    ticket: { oneWay: train.ticket, childOneWay: childTicketOneWay, infantOneWay: infantTicketOneWay, issueFeeOneWay: issueOneWay, adultRoundTrip, childRoundTrip, infantRoundTrip, adultTrainNet, childTrainNet, infantTrainNet, childTicketCost, infantTicketCost },
     hotel: { adultHotel, childHotel: childHotelHalf, freeHotelChildren, halfHotelChildren, fullHotelChildren, childHotelCost, hotelCost: adults * adultHotel + childHotelCost },
-    adultsTotal, childrenTotal, netPurchaseTotal, profitPerPerson, totalProfit, hotelProfit, hotelPayingPersonEquivalents, finalPrice, paymentType, customerCash, loanAmount, loanEligible, loanIneligibleReason, allowNarvanOverLimit: Boolean(data.allowNarvanOverLimit),
+    adultsTotal, childrenTotal, infantTicketCost, netPurchaseTotal, profitPerPerson, totalProfit, hotelProfit, hotelPayingPersonEquivalents, finalPrice, paymentType, customerCash, loanAmount, loanEligible, loanIneligibleReason, allowNarvanOverLimit: Boolean(data.allowNarvanOverLimit),
     cashPercentActual: finalPrice ? (customerCash / finalPrice) * 100 : 0, loanPercentActual: finalPrice ? (loanAmount / finalPrice) * 100 : 0 };
 }
 
@@ -241,8 +274,9 @@ function formatRailCalculation(result) {
 
   text += "\n━━━━━━━━━━━━━━\n🚆 بلیت رفت و برگشت\n\n";
   text += `🎫 بلیت بزرگسال + صدور: ${formatMoney(result.ticket.adultRoundTrip)}\n`;
-  text += `🎫 بلیت کودک ۲ تا کمتر از ۱۲ سال با درصد ${formatNumber(result.childTicketPercent)}٪: ${formatMoney(result.ticket.childRoundTrip)}\n`;
-  text += `👶 بلیت نوزاد زیر ۲ سال: رایگان\n`;
+  text += `🎫 بلیت کودک ۲ تا کمتر از ۱۲ سال (حدود ${String(result.childTicketPercent).replace(".", "٫")}٪ نرخ بزرگسال): ${formatMoney(result.ticket.childRoundTrip)}\n`;
+  text += `👶 بلیت رفت‌وبرگشت هر نوزاد: ${result.ticket.infantRoundTrip > 0 ? formatMoney(result.ticket.infantRoundTrip) : "رایگان"}\n`;
+  if (result.infants > 0 && result.ticket.infantRoundTrip > 0) text += `👶 مجموع بلیت نوزادان: ${formatMoney(result.infantTicketCost)}\n`;
 
   text += "\n━━━━━━━━━━━━━━\n🏨 هتل\n\n";
   text += `🏨 نرخ بزرگسال هر شب: ${formatMoney(result.hotelPrice)}\n`;
@@ -435,6 +469,8 @@ module.exports = {
   roundCustomerAmount,
   roundLoanAmount,
   roundNarvanAmount,
+  getNarvanLoanAmount,
+  getNarvanRepayment,
   formatMoney,
   formatNumber
 };

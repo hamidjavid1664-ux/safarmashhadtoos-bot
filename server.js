@@ -1038,9 +1038,10 @@ function calendarKeyboard(year, month, mode, selectedDate = "") {
   ]);
   rows.push(["ش", "ی", "د", "س", "چ", "پ", "ج"].map(x => ({ text: x, callback_data: "TOUR_CAL_NOOP" })));
   const firstDay = jalaliToDay(`${year}/${String(month).padStart(2,"0")}/01`);
-  // هفته از شنبه شروع می‌شود؛ ۱۴۰۵/۰۱/۰۱ شنبه بوده و ۱۴۰۵/۰۷/۰۱ چهارشنبه است.
-  // اضافه‌کردن ۶ در نسخه قبلی باعث می‌شد تقویم یک روز عقب بیفتد.
-  const offset = ((firstDay - jalaliToDay("1405/01/01")) % 7 + 7) % 7;
+  // مرجع قطعی تقویم: ۱۴۰۵/۰۸/۰۱ جمعه است. چون ستون‌ها از شنبه شروع می‌شوند،
+  // جمعه اندیس ۶ دارد. محاسبه اختلاف روزها از این مرجع جلوی جابه‌جایی یک‌روزه را می‌گیرد.
+  const anchorDay = jalaliToDay("1405/08/01");
+  const offset = ((6 + firstDay - anchorDay) % 7 + 7) % 7;
   const days = jalaliMonthLength(month);
   let row = Array(offset).fill({ text: "·", callback_data: "TOUR_CAL_NOOP" });
   for (let day = 1; day <= days; day++) {
@@ -4268,12 +4269,33 @@ async function handleCallback(
       return;
     }
     if (!d.departureDate || jalaliToDay(checked.normalized) <= jalaliToDay(d.departureDate)) {
-      await editMessageText(chatId, cb?.message?.message_id, "❌ تاریخ خروج باید بعد از تاریخ ورود باشد. لطفاً روز دیگری انتخاب کنید.", calendarKeyboard(year, month, "OUT", d.returnDate)).catch(async () => {
+      await editMessageText(
+        chatId,
+        cb?.message?.message_id,
+        `❌ تاریخ خروج باید بعد از تاریخ ورود باشد.
+📅 تاریخ ورود: ${d.departureDate}
+لطفاً تاریخ خروج دیگری انتخاب کنید:`,
+        calendarKeyboard(year, month, "OUT", d.returnDate)
+      ).catch(async () => {
         await sendMessage(chatId, "❌ تاریخ خروج باید بعد از تاریخ ورود باشد. لطفاً روز دیگری انتخاب کنید.", calendarKeyboard(year, month, "OUT", d.returnDate));
       });
       return;
     }
-    await askNights(chatId, { ...d, returnDate: checked.normalized });
+    const updatedData = { ...d, returnDate: checked.normalized };
+    // تاریخ خروج را روی همان پیام تقویم به مشتری تأیید می‌کنیم؛ سپس مرحله تعداد شب را می‌فرستیم.
+    try {
+      await editMessageText(
+        chatId,
+        cb?.message?.message_id,
+        `✅ تاریخ خروج شما ثبت شد: ${checked.normalized.replaceAll("/", "/")}
+📅 تاریخ ورود: ${d.departureDate}`
+      );
+    } catch (e) {
+      console.log("Departure date confirmation edit fallback:", e.message);
+      await sendMessage(chatId, `✅ تاریخ خروج شما ثبت شد: ${checked.normalized}
+📅 تاریخ ورود: ${d.departureDate}`);
+    }
+    await askNights(chatId, updatedData);
     return;
   }
   if (data.startsWith("TOUR_CHILD_AGE_")) {

@@ -1147,6 +1147,17 @@ async function askTourOut(
   await showTourCalendar(chatId, "OUT", now[0], now[1], d, calendarMessageId);
 }
 
+function tourDateEditKeyboard() {
+  return { inline_keyboard: [
+    [{ text: "✏️ ویرایش تاریخ ورود", callback_data: "TOUR_EDIT_DATE_IN" }],
+    [{ text: "✏️ ویرایش تاریخ خروج", callback_data: "TOUR_EDIT_DATE_OUT" }]
+  ] };
+}
+
+function hasTourConfirmationDetails(data = {}) {
+  return data.adults !== undefined && Boolean(data.applicantName) && Boolean(data.phone);
+}
+
 async function askNights(
   chatId,
   d
@@ -1159,7 +1170,7 @@ async function askNights(
 
   await sendMessage(
     chatId,
-    "🌙 تعداد شب اقامت را وارد کنید.\nمثال: ۳",
+    `🌙 تعداد شب اقامت را وارد کنید.\nمثال: ۳\n\n📅 ورود به مشهد: ${d.departureDate || "ثبت نشده"}\n📅 خروج از مشهد: ${d.returnDate || "ثبت نشده"}`,
     backKeyboard()
   );
 }
@@ -1351,9 +1362,20 @@ async function showConfirm(
         ],
         [
           {
-            text: "✏️ اصلاح",
-            callback_data:
-              "TOUR_EDIT"
+            text: "✏️ ویرایش تاریخ ورود",
+            callback_data: "TOUR_EDIT_DATE_IN"
+          }
+        ],
+        [
+          {
+            text: "✏️ ویرایش تاریخ خروج",
+            callback_data: "TOUR_EDIT_DATE_OUT"
+          }
+        ],
+        [
+          {
+            text: "✏️ اصلاح سایر اطلاعات",
+            callback_data: "TOUR_EDIT"
           }
         ],
         [
@@ -4237,6 +4259,25 @@ async function handleCallback(
     cb.id
   );
 
+  // ویرایش مستقیم تاریخ‌ها از پیام تأیید اولیه یا تأیید نهایی
+  if (data === "TOUR_EDIT_DATE_IN" || data === "TOUR_EDIT_DATE_OUT") {
+    const ss = await getSession(chatId);
+    if (!ss?.data?.tourType) {
+      await sendMessage(chatId, "❌ اطلاعات درخواست پیدا نشد. لطفاً فرم تور را از ابتدا شروع کنید.");
+      return;
+    }
+    const d = { ...(ss.data || {}) };
+    const now = todayJalali().split("/").map(Number);
+    if (data === "TOUR_EDIT_DATE_IN") {
+      d.dateEditMode = "IN";
+      await showTourCalendar(chatId, "IN", now[0], now[1], d, cb?.message?.message_id || null);
+    } else {
+      d.dateEditMode = "OUT";
+      await showTourCalendar(chatId, "OUT", now[0], now[1], d, cb?.message?.message_id || null);
+    }
+    return;
+  }
+
   // تقویم شمسی فرم تور مشتری
   if (data === "TOUR_CAL_NOOP") return;
   if (data.startsWith("TOUR_CAL_NAV_")) {
@@ -4265,7 +4306,23 @@ async function handleCallback(
     const ss = await getSession(chatId);
     const d = ss?.data || {};
     if (mode === "IN") {
-      await askTourOut(chatId, { ...d, departureDate: checked.normalized }, cb?.message?.message_id || null);
+      const updatedArrival = { ...d, departureDate: checked.normalized };
+      if (d.dateEditMode === "IN") {
+        const arrivalDay = jalaliToDay(checked.normalized);
+        const returnDay = d.returnDate ? jalaliToDay(d.returnDate) : 0;
+        if (returnDay > arrivalDay) {
+          updatedArrival.nights = returnDay - arrivalDay;
+          delete updatedArrival.dateEditMode;
+          if (hasTourConfirmationDetails(updatedArrival)) await showConfirm(chatId, updatedArrival);
+          else await askNights(chatId, updatedArrival);
+          return;
+        }
+        delete updatedArrival.returnDate;
+        updatedArrival.dateEditMode = "OUT";
+        await askTourOut(chatId, updatedArrival, cb?.message?.message_id || null);
+        return;
+      }
+      await askTourOut(chatId, updatedArrival, cb?.message?.message_id || null);
       return;
     }
     if (!d.departureDate || jalaliToDay(checked.normalized) <= jalaliToDay(d.departureDate)) {
@@ -4282,18 +4339,21 @@ async function handleCallback(
       return;
     }
     const updatedData = { ...d, returnDate: checked.normalized };
-    // تاریخ خروج را روی همان پیام تقویم به مشتری تأیید می‌کنیم؛ سپس مرحله تعداد شب را می‌فرستیم.
+    if (d.dateEditMode === "OUT") {
+      updatedData.nights = jalaliToDay(checked.normalized) - jalaliToDay(d.departureDate);
+      delete updatedData.dateEditMode;
+      if (hasTourConfirmationDetails(updatedData)) await showConfirm(chatId, updatedData);
+      else await askNights(chatId, updatedData);
+      return;
+    }
+
+    // نمایش مرتب تاریخ‌ها: ابتدا ورود و سپس خروج؛ دکمه‌های ویرایش هم در دسترس می‌مانند.
+    const dateConfirmation = `✅ تاریخ‌ها ثبت شد\n📅 ورود به مشهد: ${d.departureDate}\n📅 خروج از مشهد: ${checked.normalized}`;
     try {
-      await editMessageText(
-        chatId,
-        cb?.message?.message_id,
-        `✅ تاریخ خروج شما ثبت شد: ${checked.normalized.replaceAll("/", "/")}
-📅 تاریخ ورود: ${d.departureDate}`
-      );
+      await editMessageText(chatId, cb?.message?.message_id, dateConfirmation, tourDateEditKeyboard());
     } catch (e) {
-      console.log("Departure date confirmation edit fallback:", e.message);
-      await sendMessage(chatId, `✅ تاریخ خروج شما ثبت شد: ${checked.normalized}
-📅 تاریخ ورود: ${d.departureDate}`);
+      console.log("Date confirmation edit fallback:", e.message);
+      await sendMessage(chatId, dateConfirmation, tourDateEditKeyboard());
     }
     await askNights(chatId, updatedData);
     return;
@@ -4870,10 +4930,11 @@ async function handleCallback(
             p.adults || 0
           ),
 
-        children:
-          Number(
-            p.children || 0
-          ),
+        infants: Number(p.infants || 0),
+        child2to3: Number(p.child2to3 || 0),
+        child3to5: Number(p.child3to5 || 0),
+        child5to12: Number(p.child5to12 || 0),
+        children: Number(p.children ?? (Number(p.child2to3 || 0) + Number(p.child3to5 || 0) + Number(p.child5to12 || 0))),
 
         nights:
           Number(

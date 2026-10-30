@@ -1629,6 +1629,8 @@ async function submitRequest(chatId) {
       request_code,
       user_id,
       chat_id,
+      type,
+      data,
       username,
       applicant_name,
       phone,
@@ -1639,12 +1641,14 @@ async function submitRequest(chatId) {
       status
     )
     VALUES(
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending'
+      $1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12::jsonb,'pending'
     )`,
     [
       code,
       String(chatId),
       String(chatId),
+      d.tourType,
+      JSON.stringify(payload),
       info.username || "ندارد",
       d.applicantName,
       d.phone,

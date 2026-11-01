@@ -1,5 +1,6 @@
 require("dotenv").config();
 const express = require("express");
+const path = require("path");
 const { Pool } = require("pg");
 const CONFIG = require("./config");
 const PRICING = require("./pricing");
@@ -8,6 +9,8 @@ const FoodModule = require("./food-module");
 const app = express();
 
 app.use(express.json({ limit: "20mb" }));
+// تصویر کارت واریز مامان حسنا برای نمایش در فاکتورهای ربات
+app.use("/food-assets", express.static(path.join(__dirname, "public", "food-assets")));
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,

@@ -3,6 +3,7 @@ const express = require("express");
 const { Pool } = require("pg");
 const CONFIG = require("./config");
 const PRICING = require("./pricing");
+const FoodModule = require("./food-module");
 
 const app = express();
 
@@ -563,9 +564,18 @@ function mainKeyboard() {
         {
           text: "⭐ ثبت بازخورد"
         }
+      ],
+      [
+        {
+          text: "🍲 غذای خانگی مامان حسنا"
+        },
+        {
+          text: "🏠 انتخاب کسب‌وکار"
+        }
       ]
     ],
-    resize_keyboard: true
+    resize_keyboard: true,
+    is_persistent: true
   };
 }
 
@@ -3787,6 +3797,63 @@ async function handleMessage(
 
   if (!chatId) return;
 
+  const incomingText = String(message.text || "").trim();
+  if (FoodModule.isEnabled()) {
+    const resetBothSessions = async () => {
+      await clearSession(chatId);
+      await FoodModule.resetSession(chatId).catch(error => {
+        console.warn("Could not reset Maman Hosna session:", error.message);
+      });
+    };
+
+    if (incomingText === "/start" || incomingText === "🏠 انتخاب کسب‌وکار") {
+      await resetBothSessions();
+      if (isAdmin(chatId)) {
+        await sendMessage(
+          chatId,
+          "سلام 🌿\nلطفاً پنل مدیریتی موردنظر را انتخاب کنید:",
+          { keyboard: [[{ text: "🧮 مدیریت سفر" }, { text: "🍲 مدیریت غذا" }]], resize_keyboard: true, is_persistent: true }
+        );
+      } else {
+        await sendMessage(
+          chatId,
+          "سلام 🌿\nبه سامانه دو کسب‌وکار خوش آمدید.\nلطفاً یکی از بخش‌های زیر را انتخاب کنید:",
+          FoodModule.businessKeyboard()
+        );
+      }
+      return;
+    }
+
+    if ((isAdmin(chatId) && incomingText === "🧮 مدیریت سفر") ||
+        (!isAdmin(chatId) && incomingText === "🚌 سفر مشهد طوس")) {
+      await resetBothSessions();
+      await saveSession(chatId, "MAIN", {});
+      await sendMessage(
+        chatId,
+        isAdmin(chatId)
+          ? "🧮 پنل مدیریت سفر مشهد طوس\nاز دکمه‌های مدیریتی زیر برای محاسبات، تنظیم طرح‌ها و بررسی درخواست‌ها استفاده کنید."
+          : "🌿 به بخش مستقل سفر مشهد طوس خوش آمدید.\nخدمات سفر و گردشگری را از منوی زیر انتخاب کنید:",
+        mainKeyboard()
+      );
+      if (isAdmin(chatId)) {
+        await sendMessage(chatId, "⚙️ ابزارهای مدیریت سفر", managerCalcMenu());
+      }
+      return;
+    }
+
+    if ((!isAdmin(chatId) && incomingText === "🍲 غذای خانگی مامان حسنا") ||
+        (isAdmin(chatId) && incomingText === "🍲 مدیریت غذا")) {
+      await clearSession(chatId);
+      if (!isAdmin(chatId)) await FoodModule.resetSession(chatId).catch(() => {});
+      if (await FoodModule.handleMessage(message)) return;
+    }
+
+    if (await FoodModule.handleMessage(message)) return;
+  } else if (incomingText === "🍲 غذای خانگی مامان حسنا" || incomingText === "🍲 مدیریت غذا") {
+    await sendMessage(chatId, "⚠️ بخش غذای خانگی در حال حاضر به پایگاه داده متصل نیست. لطفاً بعداً دوباره امتحان کنید.");
+    return;
+  }
+
   let session =
     await getSession(chatId);
 
@@ -4349,6 +4416,8 @@ async function handleCallback(
     );
 
   if (!chatId) return;
+
+  if (FoodModule.isEnabled() && await FoodModule.handleCallback(cb)) return;
 
   await answerCallback(
     cb.id
@@ -5957,6 +6026,21 @@ app.get(
 (async () => {
   try {
     await initDB();
+
+    try {
+      await FoodModule.init({
+        sendMessage,
+        sendPhoto,
+        bale,
+        adminId: CONFIG.ADMIN_CHAT_ID
+      });
+      if (FoodModule.isEnabled()) {
+        console.log("✅ Maman Hosna module connected; food data uses FOOD_DATABASE_URL separately.");
+      }
+    } catch (foodError) {
+      console.error("⚠️ Maman Hosna module could not initialize; travel service will remain available:", foodError.message);
+      await FoodModule.shutdown().catch(() => {});
+    }
 
     app.listen(
       CONFIG.PORT,

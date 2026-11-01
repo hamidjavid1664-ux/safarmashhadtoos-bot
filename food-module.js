@@ -424,12 +424,26 @@ async function showAdminHome(chatId) {
 }
 async function showProductList(chatId, mode = "view") {
   const products = await getProducts();
-  const labels = products.map(p => {
-    const status = p.active === false ? "⛔ غیرفعال" : Number(p.stock) > 0 ? `✅ موجودی ${faNum(p.stock)}` : "ناموجود";
-    return [{ text: `${p.name} | ${money(p.price)} | ${status}`.slice(0, 60), callback_data: `FOODADMIN_PRODUCT:${mode}:${p.id}` }];
-  });
+  let labels;
+  if (mode === "stock") {
+    labels = [];
+    for (const p of products) {
+      const status = p.active === false ? "⛔ غیرفعال" : Number(p.stock) > 0 ? `✅ ${faNum(p.stock)} عدد` : "ناموجود";
+      labels.push([{ text: `${p.name} | ${status}`.slice(0, 60), callback_data: `FOODADMIN_PRODUCT:stock:${p.id}` }]);
+      labels.push([
+        { text: "➕ افزایش موجودی", callback_data: `FOODADMIN_STOCK:plus:${p.id}` },
+        { text: "➖ کاهش موجودی", callback_data: `FOODADMIN_STOCK:minus:${p.id}` },
+        { text: "⛔ ناموجود کردن", callback_data: `FOODADMIN_STOCK:zero:${p.id}` }
+      ]);
+    }
+  } else {
+    labels = products.map(p => {
+      const status = p.active === false ? "⛔ غیرفعال" : Number(p.stock) > 0 ? `✅ موجودی ${faNum(p.stock)}` : "ناموجود";
+      return [{ text: `${p.name} | ${money(p.price)} | ${status}`.slice(0, 60), callback_data: `FOODADMIN_PRODUCT:${mode}:${p.id}` }];
+    });
+  }
   labels.push([{ text: "🔙 پنل مدیریت", callback_data: "FOODADMIN_HOME" }]);
-  return sendMessage(chatId, "غذا را از فهرست انتخاب کنید:", { inline_keyboard: labels });
+  return sendMessage(chatId, mode === "stock" ? "📦 مدیریت موجودی هر غذا\nبرای هر غذا یکی از سه عملیات زیر را انتخاب کنید:" : "غذا را از فهرست انتخاب کنید:", { inline_keyboard: labels });
 }
 async function showDailyMenu(chatId, which) {
   const products = await getProducts();
@@ -715,6 +729,24 @@ async function handleCallback(callback) {
     await beginCheckout(chatId, cart); return true;
   }
   if (action === "FOODADMIN_HOME") { await showAdminHome(chatId); return true; }
+  if (action === "FOODADMIN_STOCK") {
+    const operation = arg1;
+    const productId = arg2;
+    const p = await getProduct(productId);
+    if (!p) { await sendMessage(chatId, "غذا پیدا نشد.", adminKeyboard()); return true; }
+    let result;
+    if (operation === "plus") {
+      result = await query("UPDATE products SET stock=stock+1,updated_at=NOW() WHERE id=$1 RETURNING stock", [productId]);
+    } else if (operation === "minus") {
+      result = await query("UPDATE products SET stock=GREATEST(stock-1,0),updated_at=NOW() WHERE id=$1 RETURNING stock", [productId]);
+    } else if (operation === "zero") {
+      result = await query("UPDATE products SET stock=0,updated_at=NOW() WHERE id=$1 RETURNING stock", [productId]);
+    } else { return true; }
+    const stock = Number(result.rows[0]?.stock ?? 0);
+    await sendMessage(chatId, `✅ موجودی «${p.name}» به‌روزرسانی شد.\nموجودی فعلی: ${faNum(stock)} عدد${stock === 0 ? "\n⛔ این غذا در حال حاضر ناموجود است." : ""}`, adminKeyboard());
+    await showProductList(chatId, "stock");
+    return true;
+  }
   if (action === "FOODADMIN_FEE") {
     await saveSession(chatId, "admin_fee_entry", { orderId: Number(arg1) });
     await sendMessage(chatId, `هزینه پیک سفارش #${arg1} را به تومان وارد کنید. اگر ارسال رایگان است عدد ۰ را بفرستید. پس از ثبت، فاکتور نهایی و اطلاعات پرداخت برای مشتری ارسال می‌شود.`, adminKeyboard()); return true;

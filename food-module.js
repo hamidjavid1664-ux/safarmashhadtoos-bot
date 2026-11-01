@@ -158,6 +158,7 @@ async function init(options = {}) {
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_sent BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_method TEXT NOT NULL DEFAULT 'پیک مجموعه'",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt_file_id TEXT",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt_type TEXT",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS admin_note TEXT",
@@ -275,11 +276,12 @@ async function sendAdminOrder(orderId, intro = "🛒 سفارش جدید مام�
   const mapUrl = row.latitude != null && row.longitude != null
     ? `https://maps.google.com/?q=${row.latitude},${row.longitude}` : "";
   const inline = [];
-  if (row.status === "در انتظار تعیین هزینه ارسال") inline.push([{ text: `💵 تعیین هزینه پیک سفارش #${row.id}`, callback_data: `FOODADMIN_FEE:${row.id}` }]);
+  if (row.status === "در انتظار تعیین هزینه ارسال") inline.push([{ text: `💵 تعیین هزینه ${row.delivery_method === "مراجعه حضوری" ? "دریافت" : "ارسال"} سفارش #${row.id}`, callback_data: `FOODADMIN_FEE:${row.id}` }]);
   if (row.receipt_file_id) inline.push([{ text: `✅ تأیید پرداخت #${row.id}`, callback_data: `FOODADMIN_PAID:${row.id}` }, { text: `⚠️ رد رسید #${row.id}`, callback_data: `FOODADMIN_REJECT:${row.id}` }]);
   if (["فاکتور صادر شده", "پرداخت تأیید شد"].includes(row.status)) inline.push([{ text: `🍳 شروع آماده‌سازی #${row.id}`, callback_data: `FOODADMIN_PREP:${row.id}` }]);
   if (row.status === "در حال آماده‌سازی") inline.push([{ text: `🥘 آماده تحویل #${row.id}`, callback_data: `FOODADMIN_READY:${row.id}` }]);
-  if (row.status === "آماده تحویل") inline.push([{ text: `🚚 تحویل به پیک #${row.id}`, callback_data: `FOODADMIN_SENT:${row.id}` }]);
+  if (row.status === "آماده تحویل" && row.delivery_method !== "مراجعه حضوری") inline.push([{ text: `🚚 تحویل به پیک #${row.id}`, callback_data: `FOODADMIN_SENT:${row.id}` }]);
+  if (row.status === "آماده تحویل حضوری") inline.push([{ text: `✅ تحویل حضوری انجام شد #${row.id}`, callback_data: `FOODADMIN_PICKEDUP:${row.id}` }]);
   if (row.status === "ارسال‌شده") inline.push([{ text: `✅ تحویل شد #${row.id}`, callback_data: `FOODADMIN_DELIVERED:${row.id}` }]);
   if (!["تحویل‌شده", "لغو شده"].includes(row.status)) inline.push([{ text: `❌ لغو سفارش #${row.id} و برگشت موجودی`, callback_data: `FOODADMIN_CANCEL:${row.id}` }]);
   inline.push([{ text: "📋 پنل مدیریت غذا", callback_data: "FOODADMIN_HOME" }]);
@@ -288,7 +290,7 @@ async function sendAdminOrder(orderId, intro = "🛒 سفارش جدید مام�
   const feeLine = row.delivery_fee == null ? "هزینه پیک: در انتظار تعیین" : `هزینه پیک: ${money(row.delivery_fee)}`;
   const totalLine = row.total == null ? "مبلغ نهایی: پس از تعیین هزینه پیک" : `مبلغ نهایی: ${money(row.total)}`;
   await sendMessage(adminId,
-    `${intro} #${row.id}\n👤 مشتری: ${row.customer_name || "ثبت نشده"}\n🆔 شناسه بله: ${row.chat_id}\n☎️ تلفن: ${row.phone || "ثبت نشده"}\n🏠 نشانی: ${row.address || "ثبت نشده"}${locationLine}\n\n${itemLines}\n\nجمع غذاها: ${money(row.subtotal)}\n${feeLine}\n${totalLine}\n📌 وضعیت: ${row.status}`,
+    `${intro} #${row.id}\n👤 مشتری: ${row.customer_name || "ثبت نشده"}\n🆔 شناسه بله: ${row.chat_id}\n☎️ تلفن: ${row.phone || "ثبت نشده"}\n🚚 روش دریافت: ${row.delivery_method || "پیک مجموعه"}\n🏠 نشانی: ${row.address || "برای مراجعه حضوری نیاز نیست"}${locationLine}\n\n${itemLines}\n\nجمع غذاها: ${money(row.subtotal)}\n${feeLine}\n${totalLine}\n📌 وضعیت: ${row.status}`,
     { inline_keyboard: inline });
   if (row.latitude != null && row.longitude != null) {
     try { await api("sendLocation", { chat_id: adminId, latitude: Number(row.latitude), longitude: Number(row.longitude) }); }
@@ -333,10 +335,9 @@ async function cancelOrderAndRestoreStock(orderId) {
 
 async function beginCheckout(chatId, cart) {
   if (!cart.length) return sendMessage(chatId, "سبد خرید خالی است. ابتدا از منو غذا انتخاب کنید.", foodHomeKeyboard());
-  await saveSession(chatId, "checkout_phone", { cart });
-  await sendMessage(chatId,
-    "برای ثبت سفارش، شماره تماس خود را ارسال کنید. می‌توانید شماره را بنویسید یا دکمه ارسال شماره تماس را بزنید.",
-    replyKeyboard([[{ text: "📱 ارسال شماره تماس", request_contact: true }], ["🔙 بازگشت به سبد خرید"], ["🏠 انتخاب کسب‌وکار"]]));
+  await saveSession(chatId, "checkout_method", { cart });
+  await sendMessage(chatId, "روش دریافت سفارش را انتخاب کنید:",
+    replyKeyboard([["🏠 مراجعه حضوری"], ["🛵 پیک مجموعه", "🛵 پیک اسنپ‌فود"], ["🔙 بازگشت به سبد خرید"], ["🏠 انتخاب کسب‌وکار"]]));
 }
 async function askAddress(chatId, data) {
   await saveSession(chatId, "checkout_address", data);
@@ -373,9 +374,9 @@ async function createOrder(chatId, message, data) {
       name=COALESCE(EXCLUDED.name,customers.name),phone=EXCLUDED.phone,address=EXCLUDED.address,updated_at=NOW()`,
       [String(chatId), userName(message), data.phone, data.address]);
     const inserted = await client.query(`INSERT INTO orders(
-      chat_id,customer_name,phone,address,items,subtotal,status,latitude,longitude,created_at,updated_at
-    ) VALUES($1,$2,$3,$4,$5::jsonb,$6,'در انتظار تعیین هزینه ارسال',$7,$8,NOW(),NOW()) RETURNING id`,
-      [String(chatId), userName(message), data.phone, data.address, JSON.stringify(finalItems), subtotal, data.latitude, data.longitude]);
+      chat_id,customer_name,phone,address,items,subtotal,status,latitude,longitude,delivery_method,created_at,updated_at
+    ) VALUES($1,$2,$3,$4,$5::jsonb,$6,'در انتظار تعیین هزینه ارسال',$7,$8,$9,NOW(),NOW()) RETURNING id`,
+      [String(chatId), userName(message), data.phone, data.address || null, JSON.stringify(finalItems), subtotal, data.latitude ?? null, data.longitude ?? null, data.delivery_method || "پیک مجموعه"]);
     orderId = inserted.rows[0].id;
     await client.query("COMMIT");
   } catch (error) {
@@ -385,7 +386,7 @@ async function createOrder(chatId, message, data) {
 
   await clearSession(chatId);
   await sendMessage(chatId,
-    `✅ سفارش شما با موفقیت ثبت شد.\n\n🧾 شماره سفارش: #${orderId}\nجمع غذاها: ${money(subtotal)}\nهزینه پیک: پس از بررسی مدیریت اعلام می‌شود.\n\nپس از تعیین هزینه ارسال، فاکتور نهایی و شماره کارت برای شما ارسال خواهد شد.`,
+    `✅ سفارش شما با موفقیت ثبت شد.\n\n🧾 شماره سفارش: #${orderId}\n🚚 روش دریافت: ${data.delivery_method || "پیک مجموعه"}\nجمع غذاها: ${money(subtotal)}\n${data.delivery_method === "مراجعه حضوری" ? "هزینه دریافت حضوری: رایگان" : "هزینه ارسال پس از بررسی مدیریت اعلام می‌شود."}\n\nپس از تعیین مبلغ نهایی، فاکتور و اطلاعات واریز برای شما ارسال خواهد شد.`,
     foodHomeKeyboard());
   await sendAdminOrder(orderId, "🛒 سفارش جدید؛ لطفاً هزینه پیک را تعیین کنید");
 }
@@ -409,6 +410,14 @@ async function issueInvoice(orderId, deliveryFee) {
   await sendMessage(row.chat_id,
     `🧾 فاکتور نهایی سفارش #${orderId}\n\n${lines}\n\nجمع غذاها: ${money(row.subtotal)}\nهزینه پیک: ${money(fee)}\n━━━━━━━━━━━━\n💰 مبلغ قابل پرداخت: ${money(total)}${cardText}${note ? `\n\n${note}` : ""}\n\nپس از واریز، تصویر یا فایل رسید را همین‌جا ارسال کنید.`,
     foodHomeKeyboard());
+  // کارت بانکی تصویری، همراه فاکتور برای مشتری ارسال می‌شود.
+  const publicBase = String(process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  if (publicBase) {
+    try { await sendPhoto(row.chat_id, `${publicBase}/food-assets/card-payment.jpg`, "💳 تصویر کارت واریز مامان حسنا\nبانک مسکن | به نام خانم گرگی"); }
+    catch (error) { console.error("Food bank card image send failed:", error.message); }
+  } else {
+    console.warn("Bank card image URL unavailable: set RENDER_EXTERNAL_URL or PUBLIC_BASE_URL.");
+  }
   await saveSession(row.chat_id, "await_receipt", { orderId });
 }
 
@@ -579,11 +588,23 @@ async function handleAdminMessage(chatId, message, session, text) {
 
 async function handleCustomerMessage(chatId, message, session, text) {
   const data = session?.data || {};
+  if (session?.state === "checkout_method") {
+    const methods = { "🏠 مراجعه حضوری": "مراجعه حضوری", "🛵 پیک مجموعه": "پیک مجموعه", "🛵 پیک اسنپ‌فود": "پیک اسنپ‌فود" };
+    const method = methods[text];
+    if (!method) { await sendMessage(chatId, "لطفاً یکی از سه روش دریافت را با دکمه‌ها انتخاب کنید.", replyKeyboard([["🏠 مراجعه حضوری"], ["🛵 پیک مجموعه", "🛵 پیک اسنپ‌فود"], ["🔙 بازگشت به سبد خرید"]])); return true; }
+    await saveSession(chatId, "checkout_phone", { ...data, delivery_method: method });
+    await sendMessage(chatId, "برای ثبت سفارش، شماره تماس خود را ارسال کنید یا دکمه زیر را بزنید.", replyKeyboard([[{ text: "📱 ارسال شماره تماس", request_contact: true }], ["🔙 بازگشت به سبد خرید"], ["🏠 انتخاب کسب‌وکار"]]));
+    return true;
+  }
   if (session?.state === "checkout_phone") {
     if (text === "🔙 بازگشت به سبد خرید") return showCart(chatId).then(() => true);
     const phone = String(message?.contact?.phone_number || text).replace(/[\s()-]/g, "");
     if (!/^[+0-9۰-۹٠-٩]{8,18}$/.test(phone)) { await sendMessage(chatId, "شماره تماس معتبر وارد کنید یا دکمه ارسال شماره تماس را بزنید.", replyKeyboard([[{ text: "📱 ارسال شماره تماس", request_contact: true }], ["🔙 بازگشت به سبد خرید"]])); return true; }
-    await askAddress(chatId, { ...data, phone }); return true;
+    if (data.delivery_method === "مراجعه حضوری") {
+      try { await createOrder(chatId, message, { ...data, phone, address: null, latitude: null, longitude: null }); }
+      catch (error) { await sendMessage(chatId, `⚠️ سفارش ثبت نشد: ${error.message}`, foodHomeKeyboard()); }
+    } else await askAddress(chatId, { ...data, phone });
+    return true;
   }
   if (session?.state === "checkout_address") {
     if (text === "🔙 بازگشت به سبد خرید") return showCart(chatId).then(() => true);
@@ -762,7 +783,7 @@ async function handleCallback(callback) {
   }
   if (action === "FOODADMIN_FEE") {
     await saveSession(chatId, "admin_fee_entry", { orderId: Number(arg1) });
-    await sendMessage(chatId, `هزینه پیک سفارش #${arg1} را به تومان وارد کنید. اگر ارسال رایگان است عدد ۰ را بفرستید. پس از ثبت، فاکتور نهایی و اطلاعات پرداخت برای مشتری ارسال می‌شود.`, adminKeyboard()); return true;
+    await sendMessage(chatId, `هزینه دریافت/ارسال سفارش #${arg1} را به تومان وارد کنید. برای مراجعه حضوری یا ارسال رایگان عدد ۰ را بفرستید. پس از ثبت، فاکتور نهایی و اطلاعات پرداخت برای مشتری ارسال می‌شود.`, adminKeyboard()); return true;
   }
   if (action === "FOODADMIN_VIEW") { await sendAdminOrder(Number(arg1), "🔎 جزئیات سفارش"); return true; }
   if (action === "FOODADMIN_CANCEL") {
@@ -814,17 +835,27 @@ async function handleCallback(callback) {
       FOODADMIN_PAID: ["رسید دریافت شد", "پرداخت تأیید شد", "✅ پرداخت سفارش #" + orderId + " تأیید شد."],
       FOODADMIN_REJECT: ["رسید دریافت شد", "فاکتور صادر شده", "⚠️ رسید سفارش #" + orderId + " تأیید نشد؛ لطفاً رسید صحیح ارسال کنید."],
       FOODADMIN_PREP: ["فاکتور صادر شده", "در حال آماده‌سازی", "🍳 سفارش #" + orderId + " وارد مرحله آماده‌سازی شد."],
-      FOODADMIN_READY: ["در حال آماده‌سازی", "آماده تحویل", "🥘 سفارش #" + orderId + " آماده تحویل است."],
+      FOODADMIN_READY: ["در حال آماده‌سازی", "آماده تحویل", "🥘 سفارش #" + orderId + " آماده دریافت است."],
       FOODADMIN_SENT: ["آماده تحویل", "ارسال‌شده", "🚚 سفارش #" + orderId + " تحویل پیک شد."],
-      FOODADMIN_DELIVERED: ["ارسال‌شده", "تحویل‌شده", "✅ سفارش #" + orderId + " تحویل داده شد."]
+      FOODADMIN_DELIVERED: ["ارسال‌شده", "تحویل‌شده", "✅ سفارش #" + orderId + " تحویل داده شد."],
+      FOODADMIN_PICKEDUP: ["آماده تحویل حضوری", "تحویل‌شده", "✅ سفارش #" + orderId + " حضوری تحویل شما شد."]
     };
     const transition = transitions[action];
     if (transition) {
-      const row = (await query("SELECT chat_id,status FROM orders WHERE id=$1", [orderId])).rows[0];
+      const row = (await query("SELECT chat_id,status,delivery_method FROM orders WHERE id=$1", [orderId])).rows[0];
       if (!row) { await sendMessage(chatId, "سفارش پیدا نشد.", adminKeyboard()); return true; }
       if (row.status !== transition[0]) { await sendMessage(chatId, `وضعیت فعلی سفارش «${row.status}» است و این دکمه برای آن معتبر نیست.`, adminKeyboard()); return true; }
-      await query("UPDATE orders SET status=$1,updated_at=NOW() WHERE id=$2", [transition[1], orderId]);
-      await sendMessage(row.chat_id, transition[2], foodHomeKeyboard());
+      let nextStatus = transition[1];
+      let customerNotice = transition[2];
+      if (action === "FOODADMIN_READY" && row.delivery_method === "مراجعه حضوری") {
+        nextStatus = "آماده تحویل حضوری";
+        customerNotice = `🏠 سفارش #${orderId} آماده تحویل حضوری است. می‌توانید برای دریافت مراجعه کنید.`;
+      }
+      if (action === "FOODADMIN_PICKEDUP" && row.status !== "آماده تحویل حضوری" && row.status !== "آماده تحویل") {
+        await sendMessage(chatId, "این سفارش هنوز آماده تحویل نیست.", adminKeyboard()); return true;
+      }
+      await query("UPDATE orders SET status=$1,updated_at=NOW() WHERE id=$2", [nextStatus, orderId]);
+      await sendMessage(row.chat_id, customerNotice, foodHomeKeyboard());
       await sendMessage(chatId, "✅ وضعیت سفارش به‌روزرسانی شد.", adminKeyboard());
       return true;
     }

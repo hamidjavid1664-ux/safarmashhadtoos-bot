@@ -279,7 +279,7 @@ async function sendAdminOrder(orderId, intro = "🛒 سفارش جدید مام�
   if (row.status === "در انتظار تعیین هزینه ارسال") inline.push([{ text: `💵 تعیین هزینه ${row.delivery_method === "مراجعه حضوری" ? "دریافت" : "ارسال"} سفارش #${row.id}`, callback_data: `FOODADMIN_FEE:${row.id}` }]);
   if (row.receipt_file_id) inline.push([{ text: `✅ تأیید پرداخت #${row.id}`, callback_data: `FOODADMIN_PAID:${row.id}` }, { text: `⚠️ رد رسید #${row.id}`, callback_data: `FOODADMIN_REJECT:${row.id}` }]);
   if (["فاکتور صادر شده", "پرداخت تأیید شد"].includes(row.status)) inline.push([{ text: `🍳 شروع آماده‌سازی #${row.id}`, callback_data: `FOODADMIN_PREP:${row.id}` }]);
-  if (row.status === "در حال آماده‌سازی") inline.push([{ text: `🥘 آماده تحویل #${row.id}`, callback_data: `FOODADMIN_READY:${row.id}` }]);
+  if (row.status === "در حال آماده‌سازی") inline.push([{ text: `${row.delivery_method === "مراجعه حضوری" ? "🏠 آماده تحویل حضوری" : "🥘 آماده تحویل"} #${row.id}`, callback_data: `FOODADMIN_READY:${row.id}` }]);
   if (row.status === "آماده تحویل" && row.delivery_method !== "مراجعه حضوری") inline.push([{ text: `🚚 تحویل به پیک #${row.id}`, callback_data: `FOODADMIN_SENT:${row.id}` }]);
   if (row.status === "آماده تحویل حضوری") inline.push([{ text: `✅ تحویل حضوری انجام شد #${row.id}`, callback_data: `FOODADMIN_PICKEDUP:${row.id}` }]);
   if (row.status === "ارسال‌شده") inline.push([{ text: `✅ تحویل شد #${row.id}`, callback_data: `FOODADMIN_DELIVERED:${row.id}` }]);
@@ -856,7 +856,8 @@ async function handleCallback(callback) {
       }
       await query("UPDATE orders SET status=$1,updated_at=NOW() WHERE id=$2", [nextStatus, orderId]);
       await sendMessage(row.chat_id, customerNotice, foodHomeKeyboard());
-      await sendMessage(chatId, "✅ وضعیت سفارش به‌روزرسانی شد.", adminKeyboard());
+      await sendAdminOrder(orderId, "🔄 وضعیت سفارش به‌روزرسانی شد");
+      await sendMessage(chatId, "✅ وضعیت سفارش به‌روزرسانی شد. جزئیات سفارش با دکمه مرحله بعد دوباره ارسال شد.", adminKeyboard());
       return true;
     }
   }

@@ -407,17 +407,17 @@ async function issueInvoice(orderId, deliveryFee) {
   const items = Array.isArray(row.items) ? row.items : parseJson(row.items, []);
   const lines = items.map(i => `• ${i.name} × ${faNum(i.quantity)} = ${money(i.unit_price * i.quantity)}`).join("\n");
   const cardText = `\n💳 اطلاعات واریز\nبانک: ${bank || "ثبت نشده"}\nشماره کارت: ${card}\nبه نام: ${owner}`;
-  await sendMessage(row.chat_id,
-    `🧾 فاکتور نهایی سفارش #${orderId}\n\n${lines}\n\nجمع غذاها: ${money(row.subtotal)}\nهزینه پیک: ${money(fee)}\n━━━━━━━━━━━━\n💰 مبلغ قابل پرداخت: ${money(total)}${cardText}${note ? `\n\n${note}` : ""}\n\nپس از واریز، تصویر یا فایل رسید را همین‌جا ارسال کنید.`,
-    foodHomeKeyboard());
-  // کارت بانکی تصویری، همراه فاکتور برای مشتری ارسال می‌شود.
+  // ابتدا تصویر کارت ارسال می‌شود تا بالای پیام فاکتور نمایش داده شود.
   const publicBase = String(process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || "").replace(/\/$/, "");
   if (publicBase) {
-    try { await sendPhoto(row.chat_id, `${publicBase}/food-assets/card-payment.jpg`, "💳 تصویر کارت واریز مامان حسنا\nبانک مسکن | به نام خانم گرگی"); }
+    try { await sendPhoto(row.chat_id, `${publicBase}/food-assets/card-payment.jpg`, "💳 کارت واریز مامان حسنا | بانک مسکن | به نام خانم گرگی"); }
     catch (error) { console.error("Food bank card image send failed:", error.message); }
   } else {
     console.warn("Bank card image URL unavailable: set RENDER_EXTERNAL_URL or PUBLIC_BASE_URL.");
   }
+  await sendMessage(row.chat_id,
+    `🧾 فاکتور نهایی سفارش #${orderId}\n\n${lines}\n\nجمع غذاها: ${money(row.subtotal)}\nهزینه ارسال/دریافت: ${money(fee)}\n━━━━━━━━━━━━\n💰 مبلغ قابل پرداخت: ${money(total)}${cardText}${note ? `\n\n${note}` : ""}\n\nپس از واریز، تصویر یا فایل رسید را همین‌جا ارسال کنید.`,
+    foodHomeKeyboard());
   await saveSession(row.chat_id, "await_receipt", { orderId });
 }
 
@@ -834,8 +834,8 @@ async function handleCallback(callback) {
     const transitions = {
       FOODADMIN_PAID: ["رسید دریافت شد", "پرداخت تأیید شد", "✅ پرداخت سفارش #" + orderId + " تأیید شد."],
       FOODADMIN_REJECT: ["رسید دریافت شد", "فاکتور صادر شده", "⚠️ رسید سفارش #" + orderId + " تأیید نشد؛ لطفاً رسید صحیح ارسال کنید."],
-      FOODADMIN_PREP: ["فاکتور صادر شده", "در حال آماده‌سازی", "🍳 سفارش #" + orderId + " وارد مرحله آماده‌سازی شد."],
-      FOODADMIN_READY: ["در حال آماده‌سازی", "آماده تحویل", "🥘 سفارش #" + orderId + " آماده دریافت است."],
+      FOODADMIN_PREP: ["فاکتور صادر شده", "در حال آماده‌سازی", "🍳 سفارش شما با شماره #" + orderId + " قطعی شد و در حال آماده‌سازی است. پس از آماده شدن، به شما اطلاع می‌دهیم."],
+      FOODADMIN_READY: ["در حال آماده‌سازی", "آماده تحویل", "🥘 غذای سفارش شما با شماره #" + orderId + " آماده ارسال است. به‌زودی برایتان ارسال می‌شود."],
       FOODADMIN_SENT: ["آماده تحویل", "ارسال‌شده", "🚚 سفارش #" + orderId + " تحویل پیک شد."],
       FOODADMIN_DELIVERED: ["ارسال‌شده", "تحویل‌شده", "✅ سفارش #" + orderId + " تحویل داده شد."],
       FOODADMIN_PICKEDUP: ["آماده تحویل حضوری", "تحویل‌شده", "✅ سفارش #" + orderId + " حضوری تحویل شما شد."]
@@ -849,7 +849,7 @@ async function handleCallback(callback) {
       let customerNotice = transition[2];
       if (action === "FOODADMIN_READY" && row.delivery_method === "مراجعه حضوری") {
         nextStatus = "آماده تحویل حضوری";
-        customerNotice = `🏠 سفارش #${orderId} آماده تحویل حضوری است. می‌توانید برای دریافت مراجعه کنید.`;
+        customerNotice = `🏠 غذای شما آماده تحویل حضوری است. جهت دریافت غذای خود لطفاً تشریف بیاورید.\n\n📍 آدرس غذای خانگی مامان حسنا:\nhttps://nshn.ir/rbEeWfOx7eoI\n\nلطفاً پیش از مراجعه، شماره سفارش #${orderId} را اعلام بفرمایید.`;
       }
       if (action === "FOODADMIN_PICKEDUP" && row.status !== "آماده تحویل حضوری" && row.status !== "آماده تحویل") {
         await sendMessage(chatId, "این سفارش هنوز آماده تحویل نیست.", adminKeyboard()); return true;

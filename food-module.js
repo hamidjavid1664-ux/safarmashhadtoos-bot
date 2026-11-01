@@ -53,18 +53,24 @@ function foodHomeKeyboard() {
     ["🏠 انتخاب کسب‌وکار"]
   ]);
 }
+const ADMIN_MENU_ITEMS = [
+  ["🧾 سفارش‌های جدید", "💵 در انتظار هزینه پیک"],
+  ["🧾 رسیدهای پرداخت", "📦 همه سفارش‌ها"],
+  ["📋 فهرست غذاها", "➕ افزودن غذا"],
+  ["✏️ ویرایش غذا", "⛔ فعال/غیرفعال غذا"],
+  ["📦 تنظیم موجودی", "💰 تغییر قیمت"],
+  ["📸 تغییر عکس غذا", "🗑️ حذف از منو"],
+  ["📅 منوی امروز", "🕒 منوی فردا"],
+  ["💳 تنظیم کارت پرداخت", "📝 توضیح پرداخت"],
+  ["🏠 انتخاب پنل مدیریت"]
+];
 function adminKeyboard() {
-  return replyKeyboard([
-    ["🧾 سفارش‌های جدید", "💵 در انتظار هزینه پیک"],
-    ["🧾 رسیدهای پرداخت", "📦 همه سفارش‌ها"],
-    ["📋 فهرست غذاها", "➕ افزودن غذا"],
-    ["✏️ ویرایش غذا", "⛔ فعال/غیرفعال غذا"],
-    ["📦 تنظیم موجودی", "💰 تغییر قیمت"],
-    ["📸 تغییر عکس غذا", "🗑️ حذف از منو"],
-    ["📅 منوی امروز", "🕒 منوی فردا"],
-    ["💳 تنظیم کارت پرداخت", "📝 توضیح پرداخت"],
-    ["🏠 انتخاب پنل مدیریت"]
-  ]);
+  return {
+    inline_keyboard: ADMIN_MENU_ITEMS.map(row => row.map(label => ({
+      text: label,
+      callback_data: `FOODADMIN_MENU:${ADMIN_MENU_ITEMS.flat().indexOf(label)}`
+    })))
+  };
 }
 function businessKeyboard() {
   return replyKeyboard([
@@ -729,6 +735,13 @@ async function handleCallback(callback) {
     await beginCheckout(chatId, cart); return true;
   }
   if (action === "FOODADMIN_HOME") { await showAdminHome(chatId); return true; }
+  if (action === "FOODADMIN_MENU") {
+    const index = Number(arg1);
+    const label = ADMIN_MENU_ITEMS.flat()[index];
+    if (!label) return true;
+    await handleAdminMenu(chatId, { ...callback.message, from: callback.from, text: label }, await getSession(chatId), label);
+    return true;
+  }
   if (action === "FOODADMIN_STOCK") {
     const operation = arg1;
     const productId = arg2;

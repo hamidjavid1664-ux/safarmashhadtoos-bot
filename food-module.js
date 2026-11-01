@@ -68,7 +68,7 @@ function adminKeyboard() {
 }
 function businessKeyboard() {
   return replyKeyboard([
-    ["🚌 سفر مشهد طوس"],
+    ["🚌 سفر مشهد توس"],
     ["🍲 غذای خانگی مامان حسنا"]
   ]);
 }
@@ -159,6 +159,13 @@ async function init(options = {}) {
   ];
   for (const statement of additions) await query(statement);
 
+  // مقدار اولیه کارت مامان حسنا؛ فقط در صورت نبودن تنظیم قبلی ثبت می‌شود.
+  await query(`INSERT INTO food_settings(setting_key,setting_value,updated_at) VALUES
+    ('bank_name','بانک مسکن',NOW()),
+    ('card_number','6280231395242646',NOW()),
+    ('card_owner','خانم گرگی',NOW())
+    ON CONFLICT(setting_key) DO NOTHING`);
+
   for (const [id, name, price] of DEFAULT_PRODUCTS) {
     await query(`INSERT INTO products(id,name,price,stock) VALUES($1,$2,$3,0)
       ON CONFLICT(id) DO NOTHING`, [id, name, price]);
@@ -242,7 +249,7 @@ async function showCart(chatId) {
 async function showHome(chatId, name = "") {
   await clearSession(chatId);
   await sendMessage(chatId,
-    `🍲 به بخش مستقل «غذای خانگی مامان حسنا» خوش آمدید${name ? `، ${name}` : ""}.\n\nاز دکمه‌های زیر برای مشاهده منو و ثبت سفارش استفاده کنید.`,
+    `🍲 به بخش مستقل «غذای خانگی مامان حسنا» خوش آمدید${name ? `، ${name}` : ""}.\n\nتهیه و سفارش غذاهای خانگی با طعم اصیل ایرانی، ویژه همشهریان عزیز شهر بوشهر.\n📍 ثبت سفارش و ارسال فقط داخل شهر بوشهر انجام می‌شود.\n\nاز دکمه‌های زیر برای مشاهده منو و ثبت سفارش استفاده کنید.`,
     foodHomeKeyboard());
 }
 
@@ -595,7 +602,7 @@ async function handleCustomerMessage(chatId, message, session, text) {
     const rows = (await query("SELECT id,status,total,created_at FROM orders WHERE chat_id=$1 ORDER BY id DESC LIMIT 10", [String(chatId)])).rows;
     await sendMessage(chatId, rows.length ? rows.map(r => `🧾 سفارش #${r.id}\n📌 وضعیت: ${r.status}\n💰 مبلغ: ${r.total == null ? "در انتظار تعیین هزینه پیک" : money(r.total)}\n📅 ${new Date(r.created_at).toLocaleDateString("fa-IR", { timeZone: "Asia/Tehran" })}`).join("\n\n") : "هنوز سفارشی ثبت نکرده‌اید.", foodHomeKeyboard()); return true;
   }
-  if (text === "📍 نشانی مجموعه") { await sendMessage(chatId, "برای ثبت سفارش، از منوی غذا اقدام کنید. اطلاعات نشانی و محدوده ارسال توسط مدیریت اعلام می‌شود.", foodHomeKeyboard()); return true; }
+  if (text === "📍 نشانی مجموعه") { await sendMessage(chatId, "📍 نشانی مجموعه مامان حسنا:\nبرای مشاهده موقعیت روی نقشه، لینک زیر را باز کنید:\nhttps://nshn.ir/rbEeWfOx7eoI\n\n🚚 سفارش و ارسال غذا فقط در محدوده شهر بوشهر انجام می‌شود.", foodHomeKeyboard()); return true; }
   if (text === "📞 تماس با مامان حسنا") { await sendMessage(chatId, "☎️ تماس با مامان حسنا\n۰۹۱۷۷۷۰۰۹۶۱\n۰۹۱۷۹۰۶۸۵۴۴", foodHomeKeyboard()); return true; }
   if (text === "🏠 انتخاب کسب‌وکار") { await clearSession(chatId); await sendMessage(chatId, "یکی از دو کسب‌وکار را انتخاب کنید.", businessKeyboard()); return true; }
   if (text === "🍲 غذای خانگی مامان حسنا") { await showHome(chatId, userName(message)); return true; }
@@ -658,7 +665,7 @@ async function handleAdminMenu(chatId, message, session, text) {
   if (text === "🕒 منوی فردا") return showDailyMenu(chatId, "tomorrow").then(() => true);
   if (text === "💳 تنظیم کارت پرداخت") {
     await saveSession(chatId, "admin_bank_card", {});
-    await sendMessage(chatId, "شماره کارت ۱۶ رقمی مربوط به کسب‌وکار مامان حسنا را وارد کنید.\n\nکارت سفر مشهد طوس به‌صورت خودکار استفاده نمی‌شود.", adminKeyboard()); return true;
+    await sendMessage(chatId, "شماره کارت ۱۶ رقمی مربوط به کسب‌وکار مامان حسنا را وارد کنید.\n\nکارت سفر مشهد توس به‌صورت خودکار استفاده نمی‌شود.", adminKeyboard()); return true;
   }
   if (text === "📝 توضیح پرداخت") {
     await saveSession(chatId, "admin_bank_note", {});

@@ -849,7 +849,7 @@ async function handleCallback(callback) {
       let customerNotice = transition[2];
       if (action === "FOODADMIN_READY" && row.delivery_method === "مراجعه حضوری") {
         nextStatus = "آماده تحویل حضوری";
-        customerNotice = `🏠 غذای شما آماده تحویل حضوری است. جهت دریافت غذای خود لطفاً تشریف بیاورید.\n\n📍 آدرس غذای خانگی مامان حسنا:\nhttps://nshn.ir/rbEeWfOx7eoI\n\nلطفاً پیش از مراجعه، شماره سفارش #${orderId} را اعلام بفرمایید.`;
+        customerNotice = `🏠 مشتری گرامی، غذای شما آماده تحویل حضوری است.\n\nجهت دریافت سفارش خود، لطفاً به آدرس زیر تشریف بیاورید:\n\n📍 آدرس غذای خانگی مامان حسنا:\nhttps://nshn.ir/rbEeWfOx7eoI\n\nلطفاً هنگام مراجعه، شماره سفارش #${orderId} را اعلام بفرمایید.\n\n🌷 نوش جان، از انتخاب شما سپاسگزاریم.`;
       }
       if (action === "FOODADMIN_PICKEDUP" && row.status !== "آماده تحویل حضوری" && row.status !== "آماده تحویل") {
         await sendMessage(chatId, "این سفارش هنوز آماده تحویل نیست.", adminKeyboard()); return true;

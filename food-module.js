@@ -15,7 +15,8 @@ const DEFAULT_PRODUCTS = [
   ["joojeh", "چلو جوجه", 480000],
   ["plain_rice", "چلو ساده", 130000],
   ["stew_bowl", "کاسه خورشت قیمه", 260000],
-  ["ghormeh_bowl", "کاسه خورشت قورمه‌سبزی", 260000]
+  ["ghormeh_bowl", "کاسه خورشت قورمه‌سبزی", 260000],
+  ["salad", "سالاد", 220000]
 ];
 
 let pool = null;
@@ -24,6 +25,7 @@ let api = null;
 let adminId = "";
 let sendMessage = null;
 let sendPhoto = null;
+let businessPosterUrl = "";
 
 function normNumber(value) {
   return String(value ?? "")
@@ -101,6 +103,7 @@ async function init(options = {}) {
   if (!options.sendMessage || !options.sendPhoto || !options.bale) throw new Error("Food module requires Bale send helpers.");
   sendMessage = options.sendMessage;
   sendPhoto = options.sendPhoto;
+  businessPosterUrl = String(options.businessPosterUrl || "").trim();
   api = options.bale;
   adminId = String(options.adminId || "").trim();
   pool = new Pool({
@@ -186,7 +189,7 @@ async function getProducts() {
   const r = await query(`SELECT id,name,price,stock,photo_file_id,active,menu_today,menu_tomorrow
     FROM products ORDER BY array_position(ARRAY[
       'stuffed_chicken','royal_chicken','shrimp','ghormeh','gheimeh_shirazi','gheimeh_eggplant',
-      'istanboli','adas','zereshk','joojeh','plain_rice','stew_bowl','ghormeh_bowl'
+      'istanboli','adas','zereshk','joojeh','plain_rice','stew_bowl','ghormeh_bowl','salad'
     ], id), name`);
   return r.rows;
 }
@@ -204,14 +207,16 @@ async function setSetting(key, value) {
 
 function productCaption(p) {
   const available = p.active !== false && Number(p.stock) > 0;
-  return `🍲 ${p.name}\n💰 قیمت هر پرس: ${money(p.price)}\n📦 موجودی: ${faNum(p.stock)} عدد\n${available ? "✅ قابل سفارش" : "⛔ فعلاً ناموجود"}`;
+  return `🍲 ${p.name}\n💰 قیمت هر پرس: ${money(p.price)}\n${available ? "✅ قابل سفارش" : "⛔ فعلاً ناموجود"}`;
 }
 function menuInline(products) {
   const rows = [];
   for (const p of products) {
     const available = p.active !== false && Number(p.stock) > 0;
-    const label = `${available ? "➕" : "⛔"} ${p.name} | ${faNum(p.price)} ت`;
-    rows.push([{ text: label.slice(0, 64), callback_data: available ? `FOOD_ADD:${p.id}` : `FOOD_INFO:${p.id}` }]);
+    const label = `${available ? "➕" : "⛔"} ${p.name}`;
+    const button = { text: label.slice(0, 64), callback_data: available ? `FOOD_ADD:${p.id}` : `FOOD_INFO:${p.id}` };
+    if (!rows.length || rows[rows.length - 1].length >= 2) rows.push([button]);
+    else rows[rows.length - 1].push(button);
   }
   rows.push([{ text: "🛒 مشاهده سبد خرید", callback_data: "FOOD_CART" }]);
   rows.push([{ text: "🔙 بازگشت", callback_data: "FOOD_HOME" }]);
@@ -237,16 +242,10 @@ function cartKeyboard(cart) {
 async function showMenu(chatId) {
   const products = await getProducts();
   const availableCount = products.filter(p => p.active !== false && Number(p.stock) > 0).length;
+  const rows = menuInline(products).inline_keyboard;
   await sendMessage(chatId,
-    `🍲 منوی غذای خانگی مامان حسنا\n\nهمه غذاها نمایش داده می‌شوند؛ غذاهای ناموجود یا غیرفعال قابل مشاهده‌اند اما امکان سفارش ندارند.\n✅ غذاهای قابل سفارش: ${faNum(availableCount)} از ${faNum(products.length)}`,
-    foodHomeKeyboard());
-  for (const p of products) {
-    const available = p.active !== false && Number(p.stock) > 0;
-    const markup = { inline_keyboard: [[{ text: available ? `➕ افزودن به سبد (${faNum(p.stock)} موجود)` : "⛔ فعلاً ناموجود", callback_data: available ? `FOOD_ADD:${p.id}` : `FOOD_INFO:${p.id}` }]] };
-    if (p.photo_file_id) await sendPhoto(chatId, p.photo_file_id, productCaption(p), markup);
-    else await sendMessage(chatId, productCaption(p), markup);
-  }
-  await sendMessage(chatId, "برای مشاهده سبد خرید یا ادامه ثبت سفارش از دکمه زیر استفاده کنید:", { inline_keyboard: [[{ text: "🛒 مشاهده سبد خرید", callback_data: "FOOD_CART" }]] });
+    `🍲 منوی غذای خانگی مامان حسنا\n\nغذای موردنظرتان را انتخاب کنید. موجودی دقیق فقط در پنل مدیریت نمایش داده می‌شود.\n✅ غذاهای قابل سفارش: ${faNum(availableCount)}`,
+    { inline_keyboard: rows });
 }
 async function showCart(chatId) {
   const s = await getSession(chatId);
@@ -255,9 +254,12 @@ async function showCart(chatId) {
 }
 async function showHome(chatId, name = "") {
   await clearSession(chatId);
-  await sendMessage(chatId,
-    `🍲 به بخش مستقل «غذای خانگی مامان حسنا» خوش آمدید${name ? `، ${name}` : ""}.\n\nتهیه و سفارش غذاهای خانگی با طعم اصیل ایرانی، ویژه همشهریان عزیز شهر بوشهر.\n📍 ثبت سفارش و ارسال فقط داخل شهر بوشهر انجام می‌شود.\n\nاز دکمه‌های زیر برای مشاهده منو و ثبت سفارش استفاده کنید.`,
-    foodHomeKeyboard());
+  const caption = `🍲 غذای خانگی مامان حسنا${name ? `، ${name} عزیز` : ""}\n\nغذاهای خانگی تازه و خوشمزه، با عشق و کیفیت خانگی تهیه می‌شوند.\n📍 ثبت سفارش و ارسال در محدوده شهر بوشهر انجام می‌شود.\n\nبرای مشاهده غذاها و ثبت سفارش، دکمه «مشاهده منو» را انتخاب کنید.`;
+  if (businessPosterUrl) {
+    await sendPhoto(chatId, businessPosterUrl, caption, foodHomeKeyboard());
+  } else {
+    await sendMessage(chatId, caption, foodHomeKeyboard());
+  }
 }
 
 function extractPhoto(message) {
@@ -468,7 +470,7 @@ async function showDailyMenu(chatId, which) {
     callback_data: `FOODADMIN_TOGGLE:${which}:${p.id}`
   }]);
   rows.push([{ text: "🔙 پنل مدیریت", callback_data: "FOODADMIN_HOME" }]);
-  await sendMessage(chatId, `📅 مدیریت منوی ${today ? "امروز" : "فردا"}\n\nروی هر غذا بزنید تا در منوی ${today ? "امروز" : "فردا"} فعال یا غیرفعال شود.\n\nنکته: طبق تنظیم شما، در منوی مشتری همه غذاها نمایش داده می‌شوند؛ وضعیت موجودی و فعال/غیرفعال بودن کنار هر غذا مشخص است.`, { inline_keyboard: rows });
+  await sendMessage(chatId, `📅 مدیریت منوی ${today ? "امروز" : "فردا"}\n\nروی هر غذا بزنید تا در منوی ${today ? "امروز" : "فردا"} فعال یا غیرفعال شود.\n\nنکته: طبق تنظیم شما، در منوی مشتری همه غذاها نمایش داده می‌شوند؛ وضعیت وضعیت موجودی فقط در پنل مدیریت نمایش داده می‌شود.`, { inline_keyboard: rows });
 }
 
 async function handleAdminMessage(chatId, message, session, text) {
@@ -688,7 +690,7 @@ async function handleAdminMenu(chatId, message, session, text) {
   if (text === "🧾 سفارش‌های جدید") return listOrders(chatId, "status='در انتظار تعیین هزینه ارسال'", "سفارش جدید").then(() => true);
   if (text === "💵 در انتظار هزینه پیک") return listOrders(chatId, "status='در انتظار تعیین هزینه ارسال'", "سفارش در انتظار هزینه پیک").then(() => true);
   if (text === "🧾 رسیدهای پرداخت") return listOrders(chatId, "status='رسید دریافت شد'", "رسید پرداخت برای بررسی").then(() => true);
-  if (text === "📦 همه سفارش‌ها") return listOrders(chatId, "TRUE", "سفارشی").then(() => true);
+  if (text === "📦 همه سفارش‌ها") return listOrders(chatId, "created_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Tehran') AT TIME ZONE 'Asia/Tehran' AND created_at < (date_trunc('day', NOW() AT TIME ZONE 'Asia/Tehran') + interval '1 day') AT TIME ZONE 'Asia/Tehran'", "سفارش‌های امروز").then(() => true);
   if (text === "📋 فهرست غذاها") {
     const ps = await getProducts();
     await sendMessage(chatId, "📋 فهرست همه غذاها\n\n" + ps.map(p => `${p.name}\nقیمت: ${money(p.price)} | موجودی: ${faNum(p.stock)} | ${p.active ? "فعال" : "غیرفعال"} | امروز: ${p.menu_today ? "بله" : "خیر"} | فردا: ${p.menu_tomorrow ? "بله" : "خیر"}`).join("\n\n"), adminKeyboard()); return true;
@@ -834,7 +836,7 @@ async function handleCallback(callback) {
     const transitions = {
       FOODADMIN_PAID: ["رسید دریافت شد", "پرداخت تأیید شد", "✅ پرداخت سفارش #" + orderId + " تأیید شد."],
       FOODADMIN_REJECT: ["رسید دریافت شد", "فاکتور صادر شده", "⚠️ رسید سفارش #" + orderId + " تأیید نشد؛ لطفاً رسید صحیح ارسال کنید."],
-      FOODADMIN_PREP: ["فاکتور صادر شده", "در حال آماده‌سازی", "🍳 سفارش شما با شماره #" + orderId + " قطعی شد و در حال آماده‌سازی است. پس از آماده شدن، به شما اطلاع می‌دهیم."],
+      FOODADMIN_PREP: [["فاکتور صادر شده", "پرداخت تأیید شد"], "در حال آماده‌سازی", "🍳 سفارش شما با شماره #" + orderId + " قطعی شد و در حال آماده‌سازی است. پس از آماده شدن، به شما اطلاع می‌دهیم."],
       FOODADMIN_READY: ["در حال آماده‌سازی", "آماده تحویل", "🥘 غذای سفارش شما با شماره #" + orderId + " آماده ارسال است. به‌زودی برایتان ارسال می‌شود."],
       FOODADMIN_SENT: ["آماده تحویل", "ارسال‌شده", "🚚 سفارش #" + orderId + " تحویل پیک شد."],
       FOODADMIN_DELIVERED: ["ارسال‌شده", "تحویل‌شده", "✅ سفارش #" + orderId + " تحویل داده شد."],
@@ -844,7 +846,8 @@ async function handleCallback(callback) {
     if (transition) {
       const row = (await query("SELECT chat_id,status,delivery_method FROM orders WHERE id=$1", [orderId])).rows[0];
       if (!row) { await sendMessage(chatId, "سفارش پیدا نشد.", adminKeyboard()); return true; }
-      if (row.status !== transition[0]) { await sendMessage(chatId, `وضعیت فعلی سفارش «${row.status}» است و این دکمه برای آن معتبر نیست.`, adminKeyboard()); return true; }
+      const allowedCurrentStatuses = Array.isArray(transition[0]) ? transition[0] : [transition[0]];
+      if (!allowedCurrentStatuses.includes(row.status)) { await sendMessage(chatId, `وضعیت فعلی سفارش «${row.status}» است و این دکمه برای آن معتبر نیست.`, adminKeyboard()); return true; }
       let nextStatus = transition[1];
       let customerNotice = transition[2];
       if (action === "FOODADMIN_READY" && row.delivery_method === "مراجعه حضوری") {

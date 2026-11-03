@@ -11,6 +11,12 @@ const app = express();
 app.use(express.json({ limit: "20mb" }));
 // تصویر کارت واریز مامان حسنا برای نمایش در فاکتورهای ربات
 app.use("/food-assets", express.static(path.join(__dirname, "public", "food-assets")));
+app.use("/business-assets", express.static(path.join(__dirname, "public", "business-assets")));
+const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL || "https://safarmashhadtoos-bot.onrender.com").replace(/\/+$/, "");
+const BUSINESS_POSTERS = {
+  travel: `${PUBLIC_BASE_URL}/business-assets/safar-mashhad-toos.jpg`,
+  food: `${PUBLIC_BASE_URL}/business-assets/maman-hosna-food.jpg`
+};
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -3831,13 +3837,20 @@ async function handleMessage(
         (!isAdmin(chatId) && incomingText === "🚌 سفر مشهد توس")) {
       await resetBothSessions();
       await saveSession(chatId, "MAIN", {});
-      await sendMessage(
-        chatId,
-        isAdmin(chatId)
-          ? "🧮 پنل مدیریت سفر مشهد توس\nاز دکمه‌های مدیریتی زیر برای محاسبات، تنظیم طرح‌ها و بررسی درخواست‌ها استفاده کنید."
-          : "✈️ سفر مشهد توس\n\nبرای برنامه‌ریزی سفر زیارتی به مشهد مقدس، تورهای هوایی، ریلی و اتوبوسی و خدمات گردشگری از منوی زیر استفاده کنید.\n\n🌟 سفر هوشمندانه به مشهد مقدس؛ شهر بهشت",
-        mainKeyboard()
-      );
+      if (isAdmin(chatId)) {
+        await sendMessage(
+          chatId,
+          "🧮 پنل مدیریت سفر مشهد توس\nاز دکمه‌های مدیریتی زیر برای محاسبات، تنظیم طرح‌ها و بررسی درخواست‌ها استفاده کنید.",
+          mainKeyboard()
+        );
+      } else {
+        await sendPhoto(
+          chatId,
+          BUSINESS_POSTERS.travel,
+          "✈️ سفر مشهد توس\n\nسفر زیارتی به مشهد مقدس با تورهای هوایی، ریلی و اتوبوسی و خدمات گردشگری.\n\n🌟 سفر هوشمندانه به مشهد مقدس؛ شهر بهشت",
+          mainKeyboard()
+        );
+      }
       if (isAdmin(chatId)) {
         await sendMessage(chatId, "⚙️ ابزارهای مدیریت سفر", managerCalcMenu());
       }
@@ -6035,7 +6048,8 @@ app.get(
         sendMessage,
         sendPhoto,
         bale,
-        adminId: CONFIG.ADMIN_CHAT_ID
+        adminId: CONFIG.ADMIN_CHAT_ID,
+        businessPosterUrl: BUSINESS_POSTERS.food
       });
       if (FoodModule.isEnabled()) {
         console.log("✅ Maman Hosna module connected; food data uses FOOD_DATABASE_URL separately.");

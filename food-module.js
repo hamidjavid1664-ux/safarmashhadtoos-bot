@@ -165,6 +165,8 @@ async function init(options = {}) {
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt_file_id TEXT",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt_type TEXT",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS admin_note TEXT",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS kitchen_sent_at TIMESTAMPTZ",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS admin_message_id BIGINT",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()"
   ];
   for (const statement of additions) await query(statement);
@@ -250,7 +252,15 @@ async function showMenu(chatId) {
 async function showCart(chatId) {
   const s = await getSession(chatId);
   const cart = Array.isArray(s?.data?.cart) ? s.data.cart : [];
-  return sendMessage(chatId, cartText(cart), cartKeyboard(cart));
+  const messageId = s?.data?.cart_message_id;
+  if (messageId) {
+    try { return await api("editMessageText", { chat_id: String(chatId), message_id: Number(messageId), text: cartText(cart), reply_markup: cartKeyboard(cart) }); }
+    catch (_) {}
+  }
+  const sent = await sendMessage(chatId, cartText(cart), cartKeyboard(cart));
+  const mid = sent?.result?.message_id || sent?.message?.message_id || sent?.message_id || null;
+  await saveSession(chatId, "customer_order", { cart, cart_message_id: mid });
+  return sent;
 }
 async function showHome(chatId, name = "") {
   await clearSession(chatId);
@@ -291,9 +301,19 @@ async function sendAdminOrder(orderId, intro = "🛒 سفارش جدید مام�
     ? `\n📍 مختصات: ${row.latitude}, ${row.longitude}\n🗺️ نقشه: ${mapUrl}` : "\n📍 موقعیت نقشه: ثبت نشده";
   const feeLine = row.delivery_fee == null ? "هزینه پیک: در انتظار تعیین" : `هزینه پیک: ${money(row.delivery_fee)}`;
   const totalLine = row.total == null ? "مبلغ نهایی: پس از تعیین هزینه پیک" : `مبلغ نهایی: ${money(row.total)}`;
-  await sendMessage(adminId,
-    `${intro} #${row.id}\n👤 مشتری: ${row.customer_name || "ثبت نشده"}\n🆔 شناسه بله: ${row.chat_id}\n☎️ تلفن: ${row.phone || "ثبت نشده"}\n🚚 روش دریافت: ${row.delivery_method || "پیک مجموعه"}\n🏠 نشانی: ${row.address || "برای مراجعه حضوری نیاز نیست"}${locationLine}\n\n${itemLines}\n\nجمع غذاها: ${money(row.subtotal)}\n${feeLine}\n${totalLine}\n📌 وضعیت: ${row.status}`,
-    { inline_keyboard: inline });
+  const adminText = `${intro} #${row.id}\n👤 مشتری: ${row.customer_name || "ثبت نشده"}\n🆔 شناسه بله: ${row.chat_id}\n☎️ تلفن: ${row.phone || "ثبت نشده"}\n🚚 روش دریافت: ${row.delivery_method || "پیک مجموعه"}\n🏠 نشانی: ${row.address || "برای مراجعه حضوری نیاز نیست"}${locationLine}\n\n${itemLines}\n\nجمع غذاها: ${money(row.subtotal)}\n${feeLine}\n${totalLine}\n📌 وضعیت: ${row.status}`;
+  if (row.admin_message_id) {
+    try { await api("editMessageText", { chat_id: String(adminId), message_id: Number(row.admin_message_id), text: adminText, reply_markup: { inline_keyboard: inline } }); }
+    catch (_) {
+      const sent = await sendMessage(adminId, adminText, { inline_keyboard: inline });
+      const mid = sent?.result?.message_id || sent?.message?.message_id || sent?.message_id;
+      if (mid) await query("UPDATE orders SET admin_message_id=$1 WHERE id=$2", [mid, row.id]);
+    }
+  } else {
+    const sent = await sendMessage(adminId, adminText, { inline_keyboard: inline });
+    const mid = sent?.result?.message_id || sent?.message?.message_id || sent?.message_id;
+    if (mid) await query("UPDATE orders SET admin_message_id=$1 WHERE id=$2", [mid, row.id]);
+  }
   if (row.latitude != null && row.longitude != null) {
     try { await api("sendLocation", { chat_id: adminId, latitude: Number(row.latitude), longitude: Number(row.longitude) }); }
     catch (e) { console.warn("Could not send food order location pin:", e.message); }
@@ -304,6 +324,19 @@ async function sendAdminOrder(orderId, intro = "🛒 سفارش جدید مام�
       else await sendPhoto(adminId, row.receipt_file_id, `🧾 رسید پرداخت سفارش #${row.id}`);
     } catch (e) { console.error("Food receipt forwarding failed:", e.message); }
   }
+}
+
+async function notifyKitchenOnce(orderId) {
+  const kitchenId = String(process.env.FOOD_KITCHEN_CHAT_ID || "").trim();
+  if (!kitchenId) { console.warn("FOOD_KITCHEN_CHAT_ID is not set; kitchen notification skipped."); return; }
+  const row = (await query("SELECT id,items,delivery_method,created_at,kitchen_sent_at FROM orders WHERE id=$1", [orderId])).rows[0];
+  if (!row || row.kitchen_sent_at) return;
+  const items = Array.isArray(row.items) ? row.items : parseJson(row.items, []);
+  const lines = items.map(i => `• ${i.name} × ${faNum(i.quantity)}`).join("\n");
+  const when = new Date(row.created_at).toLocaleString("fa-IR", { timeZone: "Asia/Tehran" });
+  const msg = `🍲 سفارش جدید آشپزخانه\n🧾 شماره سفارش: #${row.id}\n\n${lines}\n\n🕒 زمان ثبت: ${when}\n📦 روش دریافت: ${row.delivery_method || "ثبت نشده"}`;
+  await sendMessage(kitchenId, msg);
+  await query("UPDATE orders SET kitchen_sent_at=NOW() WHERE id=$1 AND kitchen_sent_at IS NULL", [orderId]);
 }
 
 async function cancelOrderAndRestoreStock(orderId) {
@@ -726,6 +759,13 @@ async function handleCallback(callback) {
   if (!chatId) return true;
   try { await api("answerCallbackQuery", { callback_query_id: callback.id }); } catch (_) {}
   const [action, arg1, arg2] = data.split(":");
+  if (action === "FOOD_SURVEY") {
+    const orderId = Number(arg1); const score = Number(arg2);
+    const updated = await query("UPDATE orders SET survey_sent=TRUE,updated_at=NOW() WHERE id=$1 AND chat_id=$2 AND status='تحویل‌شده' AND survey_sent=FALSE RETURNING id", [orderId, chatId]);
+    if (!updated.rowCount) { await sendMessage(chatId, "سپاس از همراهی شما؛ پاسخ این نظرسنجی قبلاً ثبت شده یا سفارش هنوز تحویل نشده است.", foodHomeKeyboard()); return true; }
+    await query("INSERT INTO food_settings(setting_key,setting_value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(setting_key) DO UPDATE SET setting_value=food_settings.setting_value || $2,updated_at=NOW()", [`survey_${orderId}`, `\n${score}`]);
+    await sendMessage(chatId, "🙏 از اینکه نظرتان را با ما به اشتراک گذاشتید، سپاسگزاریم.", foodHomeKeyboard()); return true;
+  }
   if (action.startsWith("FOODADMIN_") && !isAdmin(chatId)) {
     await sendMessage(chatId, "⛔ این عملیات فقط برای مدیریت فعال است."); return true;
   }
@@ -748,9 +788,21 @@ async function handleCallback(callback) {
     } else if (found) {
       found.quantity -= 1; if (found.quantity <= 0) cart.splice(cart.indexOf(found), 1);
     }
-    await saveSession(chatId, "customer_order", { cart });
-    if (p.photo_file_id && action === "FOOD_ADD") await sendPhoto(chatId, p.photo_file_id, productCaption(p), cartKeyboard(cart));
-    else await sendMessage(chatId, `${p.name}\n${action === "FOOD_ADD" ? "✅ به سبد اضافه شد." : "تعداد سبد به‌روزرسانی شد."}\n\n${cartText(cart)}`, cartKeyboard(cart));
+    const previousMessageId = s?.data?.cart_message_id || null;
+    const cartBody = `${action === "FOOD_ADD" ? "✅ سبد خرید به‌روزرسانی شد." : "🛒 سبد خرید شما به‌روزرسانی شد."}\n\n${cartText(cart)}`;
+    let messageId = previousMessageId;
+    if (previousMessageId) {
+      try {
+        await api("editMessageText", { chat_id: String(chatId), message_id: Number(previousMessageId), text: cartBody, reply_markup: cartKeyboard(cart) });
+      } catch (_) {
+        const sent = await sendMessage(chatId, cartBody, cartKeyboard(cart));
+        messageId = sent?.result?.message_id || sent?.message?.message_id || sent?.message_id || null;
+      }
+    } else {
+      const sent = await sendMessage(chatId, cartBody, cartKeyboard(cart));
+      messageId = sent?.result?.message_id || sent?.message?.message_id || sent?.message_id || null;
+    }
+    await saveSession(chatId, "customer_order", { cart, cart_message_id: messageId });
     return true;
   }
   if (action === "FOOD_CHECKOUT") {
@@ -858,7 +910,14 @@ async function handleCallback(callback) {
         await sendMessage(chatId, "این سفارش هنوز آماده تحویل نیست.", adminKeyboard()); return true;
       }
       await query("UPDATE orders SET status=$1,updated_at=NOW() WHERE id=$2", [nextStatus, orderId]);
+      if (action === "FOODADMIN_PAID") {
+        try { await notifyKitchenOnce(orderId); }
+        catch (e) { console.error("Kitchen notification failed for order", orderId, e.message); }
+      }
       await sendMessage(row.chat_id, customerNotice, foodHomeKeyboard());
+      if (action === "FOODADMIN_DELIVERED" || action === "FOODADMIN_PICKEDUP") {
+        await sendMessage(row.chat_id, `🌷 سفارش #${orderId} به دستتان رسید؟ خوشحال می‌شویم نظرتان را بدانیم.`, { inline_keyboard: [[{ text: "😍 عالی بود", callback_data: `FOOD_SURVEY:${orderId}:5` }, { text: "🙂 خوب بود", callback_data: `FOOD_SURVEY:${orderId}:4` }], [{ text: "😐 متوسط", callback_data: `FOOD_SURVEY:${orderId}:3` }, { text: "🙁 نیاز به بهبود", callback_data: `FOOD_SURVEY:${orderId}:2` }]] });
+      }
       await sendAdminOrder(orderId, "🔄 وضعیت سفارش به‌روزرسانی شد");
       await sendMessage(chatId, "✅ وضعیت سفارش به‌روزرسانی شد. جزئیات سفارش با دکمه مرحله بعد دوباره ارسال شد.", adminKeyboard());
       return true;

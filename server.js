@@ -5985,18 +5985,6 @@ app.post(
   ) => {
     res.sendStatus(200);
 
-    // Temporary diagnostic: capture group ID for FOOD_KITCHEN_CHAT_ID setup.
-    if (req.body?.message?.chat) {
-      const incomingChat = req.body.message.chat;
-      if (incomingChat.type === "group" || incomingChat.type === "supergroup") {
-        console.log("🍳 KITCHEN_GROUP_INFO", JSON.stringify({
-          id: incomingChat.id,
-          type: incomingChat.type,
-          title: incomingChat.title || ""
-        }));
-      }
-    }
-
     try {
       if (
         req.body?.message

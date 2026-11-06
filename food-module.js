@@ -51,6 +51,7 @@ function foodHomeKeyboard() {
   return replyKeyboard([
     ["🍽️ مشاهده منو", "🛒 شروع سفارش"],
     ["🛒 سبد خرید", "📦 پیگیری سفارش"],
+    ["⭐ باشگاه مشتریان", "🎉 جشنواره تخفیف"],
     ["📍 نشانی مجموعه", "📞 تماس با مامان حسنا"],
     ["🏠 انتخاب کسب‌وکار"]
   ]);
@@ -64,6 +65,8 @@ const ADMIN_MENU_ITEMS = [
   ["📸 تغییر عکس غذا", "🗑️ حذف از منو"],
   ["📅 منوی امروز", "🕒 منوی فردا"],
   ["💳 تنظیم کارت پرداخت", "📝 توضیح پرداخت"],
+  ["⭐ باشگاه مشتریان", "🎉 تنظیم جشنواره"],
+  ["📍 تنظیم محدوده ارسال"],
   ["🏠 انتخاب پنل مدیریت"]
 ];
 function adminKeyboard() {
@@ -150,6 +153,7 @@ async function init(options = {}) {
     "ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone TEXT",
     "ALTER TABLE customers ADD COLUMN IF NOT EXISTS address TEXT",
     "ALTER TABLE customers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()",
+    "ALTER TABLE customers ADD COLUMN IF NOT EXISTS loyalty_points INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_name TEXT",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS phone TEXT",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS address TEXT",
@@ -165,8 +169,8 @@ async function init(options = {}) {
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt_file_id TEXT",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt_type TEXT",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS admin_note TEXT",
-    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS kitchen_sent_at TIMESTAMPTZ",
-    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS admin_message_id BIGINT",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS loyalty_awarded BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_amount INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()"
   ];
   for (const statement of additions) await query(statement);
@@ -252,15 +256,7 @@ async function showMenu(chatId) {
 async function showCart(chatId) {
   const s = await getSession(chatId);
   const cart = Array.isArray(s?.data?.cart) ? s.data.cart : [];
-  const messageId = s?.data?.cart_message_id;
-  if (messageId) {
-    try { return await api("editMessageText", { chat_id: String(chatId), message_id: Number(messageId), text: cartText(cart), reply_markup: cartKeyboard(cart) }); }
-    catch (_) {}
-  }
-  const sent = await sendMessage(chatId, cartText(cart), cartKeyboard(cart));
-  const mid = sent?.result?.message_id || sent?.message?.message_id || sent?.message_id || null;
-  await saveSession(chatId, "customer_order", { cart, cart_message_id: mid });
-  return sent;
+  return sendMessage(chatId, cartText(cart), cartKeyboard(cart));
 }
 async function showHome(chatId, name = "") {
   await clearSession(chatId);
@@ -301,19 +297,9 @@ async function sendAdminOrder(orderId, intro = "🛒 سفارش جدید مام�
     ? `\n📍 مختصات: ${row.latitude}, ${row.longitude}\n🗺️ نقشه: ${mapUrl}` : "\n📍 موقعیت نقشه: ثبت نشده";
   const feeLine = row.delivery_fee == null ? "هزینه پیک: در انتظار تعیین" : `هزینه پیک: ${money(row.delivery_fee)}`;
   const totalLine = row.total == null ? "مبلغ نهایی: پس از تعیین هزینه پیک" : `مبلغ نهایی: ${money(row.total)}`;
-  const adminText = `${intro} #${row.id}\n👤 مشتری: ${row.customer_name || "ثبت نشده"}\n🆔 شناسه بله: ${row.chat_id}\n☎️ تلفن: ${row.phone || "ثبت نشده"}\n🚚 روش دریافت: ${row.delivery_method || "پیک مجموعه"}\n🏠 نشانی: ${row.address || "برای مراجعه حضوری نیاز نیست"}${locationLine}\n\n${itemLines}\n\nجمع غذاها: ${money(row.subtotal)}\n${feeLine}\n${totalLine}\n📌 وضعیت: ${row.status}`;
-  if (row.admin_message_id) {
-    try { await api("editMessageText", { chat_id: String(adminId), message_id: Number(row.admin_message_id), text: adminText, reply_markup: { inline_keyboard: inline } }); }
-    catch (_) {
-      const sent = await sendMessage(adminId, adminText, { inline_keyboard: inline });
-      const mid = sent?.result?.message_id || sent?.message?.message_id || sent?.message_id;
-      if (mid) await query("UPDATE orders SET admin_message_id=$1 WHERE id=$2", [mid, row.id]);
-    }
-  } else {
-    const sent = await sendMessage(adminId, adminText, { inline_keyboard: inline });
-    const mid = sent?.result?.message_id || sent?.message?.message_id || sent?.message_id;
-    if (mid) await query("UPDATE orders SET admin_message_id=$1 WHERE id=$2", [mid, row.id]);
-  }
+  await sendMessage(adminId,
+    `${intro} #${row.id}\n👤 مشتری: ${row.customer_name || "ثبت نشده"}\n🆔 شناسه بله: ${row.chat_id}\n☎️ تلفن: ${row.phone || "ثبت نشده"}\n🚚 روش دریافت: ${row.delivery_method || "پیک مجموعه"}\n🏠 نشانی: ${row.address || "برای مراجعه حضوری نیاز نیست"}${locationLine}\n\n${itemLines}\n\nجمع غذاها: ${money(row.subtotal)}\n${feeLine}\n${totalLine}\n📌 وضعیت: ${row.status}`,
+    { inline_keyboard: inline });
   if (row.latitude != null && row.longitude != null) {
     try { await api("sendLocation", { chat_id: adminId, latitude: Number(row.latitude), longitude: Number(row.longitude) }); }
     catch (e) { console.warn("Could not send food order location pin:", e.message); }
@@ -324,19 +310,6 @@ async function sendAdminOrder(orderId, intro = "🛒 سفارش جدید مام�
       else await sendPhoto(adminId, row.receipt_file_id, `🧾 رسید پرداخت سفارش #${row.id}`);
     } catch (e) { console.error("Food receipt forwarding failed:", e.message); }
   }
-}
-
-async function notifyKitchenOnce(orderId) {
-  const kitchenId = String(process.env.FOOD_KITCHEN_CHAT_ID || "").trim();
-  if (!kitchenId) { console.warn("FOOD_KITCHEN_CHAT_ID is not set; kitchen notification skipped."); return; }
-  const row = (await query("SELECT id,items,delivery_method,created_at,kitchen_sent_at FROM orders WHERE id=$1", [orderId])).rows[0];
-  if (!row || row.kitchen_sent_at) return;
-  const items = Array.isArray(row.items) ? row.items : parseJson(row.items, []);
-  const lines = items.map(i => `• ${i.name} × ${faNum(i.quantity)}`).join("\n");
-  const when = new Date(row.created_at).toLocaleString("fa-IR", { timeZone: "Asia/Tehran" });
-  const msg = `🍲 سفارش جدید آشپزخانه\n🧾 شماره سفارش: #${row.id}\n\n${lines}\n\n🕒 زمان ثبت: ${when}\n📦 روش دریافت: ${row.delivery_method || "ثبت نشده"}`;
-  await sendMessage(kitchenId, msg);
-  await query("UPDATE orders SET kitchen_sent_at=NOW() WHERE id=$1 AND kitchen_sent_at IS NULL", [orderId]);
 }
 
 async function cancelOrderAndRestoreStock(orderId) {
@@ -385,8 +358,31 @@ async function askLocation(chatId, data) {
     "اکنون موقعیت دقیق محل تحویل را از روی نقشه ارسال کنید.\n\nدر پایین صفحه دکمه «📍 ارسال موقعیت مکانی» را بزنید و محل تحویل را روی نقشه انتخاب کنید. ثبت سفارش پس از دریافت هر دو مورد، یعنی نشانی متنی و موقعیت نقشه، انجام می‌شود.",
     replyKeyboard([[{ text: "📍 ارسال موقعیت مکانی", request_location: true }], ["🔙 بازگشت به سبد خرید"], ["🏠 انتخاب کسب‌وکار"]]));
 }
+function pointInsidePolygon(lat, lon, polygon) {
+  if (!Array.isArray(polygon) || polygon.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = Number(polygon[i].longitude), yi = Number(polygon[i].latitude);
+    const xj = Number(polygon[j].longitude), yj = Number(polygon[j].latitude);
+    const intersects = ((yi > lat) !== (yj > lat)) && (lon < (xj - xi) * (lat - yi) / ((yj - yi) || 1e-12) + xi);
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+async function getDeliveryPolygon() {
+  const raw = await getSetting("delivery_polygon");
+  return parseJson(raw, []);
+}
+
 async function createOrder(chatId, message, data) {
   const cart = Array.isArray(data.cart) ? data.cart : [];
+  if (data.delivery_method !== "مراجعه حضوری") {
+    const polygon = await getDeliveryPolygon();
+    if (polygon.length >= 3 && !pointInsidePolygon(Number(data.latitude), Number(data.longitude), polygon)) {
+      throw new Error("با عرض پوزش، نشانی شما خارج از محدوده ارسال مامان حسنا است. سفارش ثبت نشد. در صورت تمایل برای هماهنگی با مدیریت تماس بگیرید.");
+    }
+    if (polygon.length < 3) throw new Error("محدوده ارسال هنوز توسط مدیریت روی نقشه تنظیم نشده است. لطفاً بعداً دوباره تلاش کنید یا با مدیریت تماس بگیرید.");
+  }
   const client = await pool.connect();
   let orderId;
   let subtotal = 0;
@@ -437,8 +433,12 @@ async function issueInvoice(orderId, deliveryFee) {
   const owner = await getSetting("card_owner");
   if (!/^\d{16}$/.test(card) || !owner) throw new Error("ابتدا از پنل مدیریت غذا، شماره کارت ۱۶ رقمی، نام صاحب کارت و بانک مامان حسنا را ثبت کنید.");
   const note = await getSetting("payment_note");
-  const total = Number(row.subtotal || 0) + fee;
-  await query(`UPDATE orders SET delivery_fee=$1,total=$2,status='فاکتور صادر شده',invoice_sent=TRUE,updated_at=NOW() WHERE id=$3`, [fee, total, orderId]);
+  const promoPercent = Number(await getSetting("promo_percent") || 0);
+  const promoUntil = await getSetting("promo_until");
+  const promoActive = promoPercent > 0 && promoPercent <= 80 && promoUntil && new Date(promoUntil).getTime() > Date.now();
+  const discount = promoActive ? Math.min(Math.round(Number(row.subtotal || 0) * promoPercent / 100), Number(await getSetting("promo_cap") || 100000000)) : 0;
+  const total = Math.max(0, Number(row.subtotal || 0) - discount) + fee;
+  await query(`UPDATE orders SET delivery_fee=$1,total=$2,discount_amount=$3,status='فاکتور صادر شده',invoice_sent=TRUE,updated_at=NOW() WHERE id=$4`, [fee, total, discount, orderId]);
   const items = Array.isArray(row.items) ? row.items : parseJson(row.items, []);
   const lines = items.map(i => `• ${i.name} × ${faNum(i.quantity)} = ${money(i.unit_price * i.quantity)}`).join("\n");
   const cardText = `\n💳 اطلاعات واریز\nبانک: ${bank || "ثبت نشده"}\nشماره کارت: ${card}\nبه نام: ${owner}`;
@@ -451,7 +451,7 @@ async function issueInvoice(orderId, deliveryFee) {
     console.warn("Bank card image URL unavailable: set RENDER_EXTERNAL_URL or PUBLIC_BASE_URL.");
   }
   await sendMessage(row.chat_id,
-    `🧾 فاکتور نهایی سفارش #${orderId}\n\n${lines}\n\nجمع غذاها: ${money(row.subtotal)}\nهزینه ارسال/دریافت: ${money(fee)}\n━━━━━━━━━━━━\n💰 مبلغ قابل پرداخت: ${money(total)}${cardText}${note ? `\n\n${note}` : ""}\n\nپس از واریز، تصویر یا فایل رسید را همین‌جا ارسال کنید.`,
+    `🧾 فاکتور نهایی سفارش #${orderId}\n\n${lines}\n\nجمع غذاها: ${money(row.subtotal)}\n${discount ? `🎉 تخفیف جشنواره (${faNum(promoPercent)}٪): ${money(discount)}\n` : ""}هزینه ارسال/دریافت: ${money(fee)}\n━━━━━━━━━━━━\n💰 مبلغ قابل پرداخت: ${money(total)}${cardText}${note ? `\n\n${note}` : ""}\n\nپس از واریز، تصویر یا فایل رسید را همین‌جا ارسال کنید.`,
     foodHomeKeyboard());
   await saveSession(row.chat_id, "await_receipt", { orderId });
 }
@@ -509,6 +509,30 @@ async function showDailyMenu(chatId, which) {
 async function handleAdminMessage(chatId, message, session, text) {
   const data = session?.data || {};
   const photoId = extractPhoto(message);
+  if (session?.state === "admin_geo_boundary") {
+    if (text === "پایان محدوده") {
+      if (!Array.isArray(data.points) || data.points.length < 3) { await sendMessage(chatId, "برای محدوده حداقل ۳ نقطه لازم است. نقاط بیشتری ارسال کنید."); return true; }
+      await setSetting("delivery_polygon", JSON.stringify(data.points)); await clearSession(chatId);
+      await sendMessage(chatId, `✅ محدوده ارسال ذخیره شد. تعداد نقاط مرزی: ${faNum(data.points.length)}\nاز این پس سفارش‌های پیک خارج از این محدوده ثبت نمی‌شوند.`, adminKeyboard()); return true;
+    }
+    if (!message?.location) { await sendMessage(chatId, "لطفاً موقعیت مکانی هر نقطه مرزی را با دکمه ارسال موقعیت بفرستید یا «پایان محدوده» را انتخاب کنید."); return true; }
+    const points = [...(data.points || []), {latitude:Number(message.location.latitude),longitude:Number(message.location.longitude)}];
+    await saveSession(chatId, "admin_geo_boundary", {points});
+    await sendMessage(chatId, `📍 نقطه ${faNum(points.length)} دریافت شد. نقطه بعدی را بفرستید یا «پایان محدوده» را انتخاب کنید.`); return true;
+  }
+  if (session?.state === "admin_promo_percent") {
+    const pct = Number(normNumber(text));
+    if (!Number.isInteger(pct) || pct < 0 || pct > 80) { await sendMessage(chatId, "درصدی بین صفر تا ۸۰ وارد کنید.", adminKeyboard()); return true; }
+    if (pct === 0) { await setSetting("promo_percent", "0"); await setSetting("promo_until", ""); await clearSession(chatId); await sendMessage(chatId, "✅ جشنواره غیرفعال شد.", adminKeyboard()); return true; }
+    await saveSession(chatId, "admin_promo_days", {percent:pct}); await sendMessage(chatId, "مدت اعتبار جشنواره را به تعداد روز وارد کنید (مثلاً ۷):", adminKeyboard()); return true;
+  }
+  if (session?.state === "admin_promo_days") {
+    const days = Number(normNumber(text));
+    if (!Number.isInteger(days) || days < 1 || days > 90) { await sendMessage(chatId, "مدت را بین ۱ تا ۹۰ روز وارد کنید.", adminKeyboard()); return true; }
+    const until = new Date(Date.now() + days*86400000).toISOString();
+    await setSetting("promo_percent", String(data.percent)); await setSetting("promo_until", until); await setSetting("promo_cap", "100000000"); await clearSession(chatId);
+    await sendMessage(chatId, `🎉 جشنواره ${faNum(data.percent)}٪ برای ${faNum(days)} روز فعال شد.`, adminKeyboard()); return true;
+  }
   if (session?.state === "admin_add_photo") {
     if (photoId) {
       await query("UPDATE products SET photo_file_id=$1,updated_at=NOW() WHERE id=$2", [photoId, data.productId]);
@@ -674,6 +698,17 @@ async function handleCustomerMessage(chatId, message, session, text) {
     return showMenu(chatId).then(() => true);
   }
   if (text === "🛒 سبد خرید") return showCart(chatId).then(() => true);
+  if (text === "⭐ باشگاه مشتریان") {
+    const c = (await query("SELECT loyalty_points FROM customers WHERE chat_id=$1", [String(chatId)])).rows[0];
+    const points = Number(c?.loyalty_points || 0);
+    const purchases = (await query("SELECT COUNT(*)::int AS n FROM orders WHERE chat_id=$1 AND status='تحویل‌شده'", [String(chatId)])).rows[0]?.n || 0;
+    await sendMessage(chatId, `⭐ باشگاه مشتریان مامان حسنا\n\nامتیاز فعلی شما: ${faNum(points)} امتیاز\nتعداد سفارش‌های تکمیل‌شده: ${faNum(purchases)}\n\nبا هر ۱۰۰ هزار تومان خرید نهایی، ۱ امتیاز دریافت می‌کنید. امتیازها پس از تحویل سفارش ثبت می‌شوند.`, foodHomeKeyboard()); return true;
+  }
+  if (text === "🎉 جشنواره تخفیف") {
+    const pct = Number(await getSetting("promo_percent") || 0); const until = await getSetting("promo_until");
+    const active = pct > 0 && until && new Date(until).getTime() > Date.now();
+    await sendMessage(chatId, active ? `🎉 جشنواره فعال مامان حسنا\nتخفیف ${faNum(pct)}٪ روی مبلغ غذاها\nاعتبار تا: ${new Date(until).toLocaleDateString("fa-IR", {timeZone:"Asia/Tehran"})}\nتخفیف هنگام صدور فاکتور محاسبه می‌شود.` : "در حال حاضر جشنواره تخفیف فعالی نداریم. برای اطلاع از جشنواره‌های بعدی همراه ما باشید.", foodHomeKeyboard()); return true;
+  }
   if (text === "📦 پیگیری سفارش") {
     const rows = (await query("SELECT id,status,total,created_at FROM orders WHERE chat_id=$1 ORDER BY id DESC LIMIT 10", [String(chatId)])).rows;
     await sendMessage(chatId, rows.length ? rows.map(r => `🧾 سفارش #${r.id}\n📌 وضعیت: ${r.status}\n💰 مبلغ: ${r.total == null ? "در انتظار تعیین هزینه پیک" : money(r.total)}\n📅 ${new Date(r.created_at).toLocaleDateString("fa-IR", { timeZone: "Asia/Tehran" })}`).join("\n\n") : "هنوز سفارشی ثبت نکرده‌اید.", foodHomeKeyboard()); return true;
@@ -698,7 +733,7 @@ async function handleMessage(message) {
       "🧾 سفارش‌های جدید", "💵 در انتظار هزینه پیک", "🧾 رسیدهای پرداخت", "📦 همه سفارش‌ها",
       "📋 فهرست غذاها", "➕ افزودن غذا", "✏️ ویرایش غذا", "⛔ فعال/غیرفعال غذا", "🗑️ حذف از منو",
       "📦 تنظیم موجودی", "💰 تغییر قیمت", "📸 تغییر عکس غذا", "📅 منوی امروز", "🕒 منوی فردا",
-      "💳 تنظیم کارت پرداخت", "📝 توضیح پرداخت", "🏠 انتخاب پنل مدیریت", "⏭️ بدون عکس"
+      "💳 تنظیم کارت پرداخت", "📝 توضیح پرداخت", "⭐ باشگاه مشتریان", "🎉 تنظیم جشنواره", "📍 تنظیم محدوده ارسال", "🏠 انتخاب پنل مدیریت", "⏭️ بدون عکس"
     ].includes(text)) {
       if (await handleAdminMenu(chatId, message, session, text)) return true;
       if (await handleAdminMessage(chatId, message, session, text)) return true;
@@ -743,6 +778,18 @@ async function handleAdminMenu(chatId, message, session, text) {
     await saveSession(chatId, "admin_bank_card", {});
     await sendMessage(chatId, "شماره کارت ۱۶ رقمی مربوط به کسب‌وکار مامان حسنا را وارد کنید.\n\nکارت سفر مشهد توس به‌صورت خودکار استفاده نمی‌شود.", adminKeyboard()); return true;
   }
+  if (text === "🎉 تنظیم جشنواره") {
+    await saveSession(chatId, "admin_promo_percent", {});
+    await sendMessage(chatId, "درصد تخفیف جشنواره را وارد کنید (۰ تا ۸۰؛ برای غیرفعال‌کردن عدد ۰):", adminKeyboard()); return true;
+  }
+  if (text === "📍 تنظیم محدوده ارسال") {
+    await saveSession(chatId, "admin_geo_boundary", { points: [] });
+    await sendMessage(chatId, "برای تعیین محدوده ارسال، نقاط مرزی را یکی‌یکی از روی نقشه به‌صورت موقعیت مکانی ارسال کنید. حداقل ۳ نقطه لازم است. پس از آخرین نقطه، عبارت «پایان محدوده» را بفرستید. ترتیب نقاط را دور محدوده و بدون پرش انتخاب کنید.", replyKeyboard([[{text:"📍 ارسال موقعیت مکانی", request_location:true}], ["پایان محدوده"], ["🏠 انتخاب پنل مدیریت"]])); return true;
+  }
+  if (text === "⭐ باشگاه مشتریان") {
+    const rows = (await query("SELECT COUNT(*)::int AS customers, COALESCE(SUM(loyalty_points),0)::int AS points FROM customers")).rows[0];
+    await sendMessage(chatId, `⭐ گزارش باشگاه مشتریان\nتعداد مشتریان ثبت‌شده: ${faNum(rows.customers)}\nمجموع امتیازهای موجود: ${faNum(rows.points)}\nقانون: هر ۱۰۰ هزار تومان خرید تحویل‌شده = یک امتیاز.`, adminKeyboard()); return true;
+  }
   if (text === "📝 توضیح پرداخت") {
     await saveSession(chatId, "admin_bank_note", {});
     await sendMessage(chatId, "توضیحی که باید زیر فاکتور و اطلاعات کارت برای مشتری فرستاده شود وارد کنید. برای پاک‌کردن توضیح، کلمه «حذف» را بفرستید.", adminKeyboard()); return true;
@@ -759,13 +806,6 @@ async function handleCallback(callback) {
   if (!chatId) return true;
   try { await api("answerCallbackQuery", { callback_query_id: callback.id }); } catch (_) {}
   const [action, arg1, arg2] = data.split(":");
-  if (action === "FOOD_SURVEY") {
-    const orderId = Number(arg1); const score = Number(arg2);
-    const updated = await query("UPDATE orders SET survey_sent=TRUE,updated_at=NOW() WHERE id=$1 AND chat_id=$2 AND status='تحویل‌شده' AND survey_sent=FALSE RETURNING id", [orderId, chatId]);
-    if (!updated.rowCount) { await sendMessage(chatId, "سپاس از همراهی شما؛ پاسخ این نظرسنجی قبلاً ثبت شده یا سفارش هنوز تحویل نشده است.", foodHomeKeyboard()); return true; }
-    await query("INSERT INTO food_settings(setting_key,setting_value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(setting_key) DO UPDATE SET setting_value=food_settings.setting_value || $2,updated_at=NOW()", [`survey_${orderId}`, `\n${score}`]);
-    await sendMessage(chatId, "🙏 از اینکه نظرتان را با ما به اشتراک گذاشتید، سپاسگزاریم.", foodHomeKeyboard()); return true;
-  }
   if (action.startsWith("FOODADMIN_") && !isAdmin(chatId)) {
     await sendMessage(chatId, "⛔ این عملیات فقط برای مدیریت فعال است."); return true;
   }
@@ -788,21 +828,9 @@ async function handleCallback(callback) {
     } else if (found) {
       found.quantity -= 1; if (found.quantity <= 0) cart.splice(cart.indexOf(found), 1);
     }
-    const previousMessageId = s?.data?.cart_message_id || null;
-    const cartBody = `${action === "FOOD_ADD" ? "✅ سبد خرید به‌روزرسانی شد." : "🛒 سبد خرید شما به‌روزرسانی شد."}\n\n${cartText(cart)}`;
-    let messageId = previousMessageId;
-    if (previousMessageId) {
-      try {
-        await api("editMessageText", { chat_id: String(chatId), message_id: Number(previousMessageId), text: cartBody, reply_markup: cartKeyboard(cart) });
-      } catch (_) {
-        const sent = await sendMessage(chatId, cartBody, cartKeyboard(cart));
-        messageId = sent?.result?.message_id || sent?.message?.message_id || sent?.message_id || null;
-      }
-    } else {
-      const sent = await sendMessage(chatId, cartBody, cartKeyboard(cart));
-      messageId = sent?.result?.message_id || sent?.message?.message_id || sent?.message_id || null;
-    }
-    await saveSession(chatId, "customer_order", { cart, cart_message_id: messageId });
+    await saveSession(chatId, "customer_order", { cart });
+    if (p.photo_file_id && action === "FOOD_ADD") await sendPhoto(chatId, p.photo_file_id, productCaption(p), cartKeyboard(cart));
+    else await sendMessage(chatId, `${p.name}\n${action === "FOOD_ADD" ? "✅ به سبد اضافه شد." : "تعداد سبد به‌روزرسانی شد."}\n\n${cartText(cart)}`, cartKeyboard(cart));
     return true;
   }
   if (action === "FOOD_CHECKOUT") {
@@ -910,14 +938,10 @@ async function handleCallback(callback) {
         await sendMessage(chatId, "این سفارش هنوز آماده تحویل نیست.", adminKeyboard()); return true;
       }
       await query("UPDATE orders SET status=$1,updated_at=NOW() WHERE id=$2", [nextStatus, orderId]);
-      if (action === "FOODADMIN_PAID") {
-        try { await notifyKitchenOnce(orderId); }
-        catch (e) { console.error("Kitchen notification failed for order", orderId, e.message); }
+      if (nextStatus === "تحویل‌شده") {
+        await query(`WITH awarded AS (UPDATE orders SET loyalty_awarded=TRUE WHERE id=$1 AND loyalty_awarded=FALSE RETURNING chat_id,total) UPDATE customers SET loyalty_points=loyalty_points+FLOOR(COALESCE((SELECT total FROM awarded),0)/100000)::int,updated_at=NOW() WHERE chat_id=(SELECT chat_id FROM awarded)`, [orderId]);
       }
       await sendMessage(row.chat_id, customerNotice, foodHomeKeyboard());
-      if (action === "FOODADMIN_DELIVERED" || action === "FOODADMIN_PICKEDUP") {
-        await sendMessage(row.chat_id, `🌷 سفارش #${orderId} به دستتان رسید؟ خوشحال می‌شویم نظرتان را بدانیم.`, { inline_keyboard: [[{ text: "😍 عالی بود", callback_data: `FOOD_SURVEY:${orderId}:5` }, { text: "🙂 خوب بود", callback_data: `FOOD_SURVEY:${orderId}:4` }], [{ text: "😐 متوسط", callback_data: `FOOD_SURVEY:${orderId}:3` }, { text: "🙁 نیاز به بهبود", callback_data: `FOOD_SURVEY:${orderId}:2` }]] });
-      }
       await sendAdminOrder(orderId, "🔄 وضعیت سفارش به‌روزرسانی شد");
       await sendMessage(chatId, "✅ وضعیت سفارش به‌روزرسانی شد. جزئیات سفارش با دکمه مرحله بعد دوباره ارسال شد.", adminKeyboard());
       return true;
